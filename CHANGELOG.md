@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.10] - 2026-03-09
+
+### Fixed
+- Improved in-combat `Power Word: Shield` visibility consistency when cooldown payload fields are protected/unreadable.
+
+### Changed
+- Reworked readiness fallback behavior to prefer cooldown-state interpretation over usability gating.
+- Added fail-open handling for protected cooldown duration fields so spells are not hidden by transient combat API restrictions.
+
 ## [1.0.8] - 2026-03-08
 
 ### Fixed
