@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.8] - 2026-03-08
+
+### Fixed
+- Improved `Power Word: Shield` display consistency for Discipline Priest when the spell is available.
+
+### Changed
+- Reworked spell known-state checks to use override-aware APIs first, with guarded fallbacks.
+- Hardened cooldown readiness logic with safer fallbacks to `IsUsableSpell` when cooldown data is missing or unreliable.
+- Updated related known-state checks used by talent fallback and `/hpm audit` reporting.
+
 ## [1.0.7] - 2026-03-08
 
 ### Changed

@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.7"
+local ADDON_VERSION = "1.0.8"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -261,18 +261,60 @@ local function getSafeCharges(spellID)
     return nil
 end
 
+local function isSpellKnownSafe(spellID)
+    if not spellID then
+        return false
+    end
+
+    if IsSpellKnownOrOverridesKnown then
+        local ok, known = pcall(IsSpellKnownOrOverridesKnown, spellID)
+        if ok and known then
+            return true
+        end
+    end
+
+    if IsPlayerSpell then
+        local ok, known = pcall(IsPlayerSpell, spellID)
+        if ok and known then
+            return true
+        end
+    end
+
+    if IsSpellKnown then
+        local ok, known = pcall(IsSpellKnown, spellID)
+        if ok and known then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function isSpellUsableSafe(spellID)
+    if not IsUsableSpell then
+        return false
+    end
+    local ok, usable = pcall(function()
+        return IsUsableSpell(spellID)
+    end)
+    if ok then
+        return usable and true or false
+    end
+    return false
+end
+
 local function getCooldownReady(spellID)
-    if not IsPlayerSpell(spellID) then
+    if not isSpellKnownSafe(spellID) then
         return false
     end
     if C_Spell and C_Spell.GetSpellCooldown then
-        local info = C_Spell.GetSpellCooldown(spellID)
-        if not info then
-            return false
+        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if not ok or not info then
+            return isSpellUsableSafe(spellID)
         end
         -- Midnight can return secret booleans; avoid direct truth tests on API fields.
         if isFalseFlag(info.isEnabled, false) then
-            return false
+            return isSpellUsableSafe(spellID)
         end
         local duration = plainNumber(info.duration)
         if duration and numberLE(duration, 0) then
@@ -281,9 +323,9 @@ local function getCooldownReady(spellID)
         if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
             return true
         end
-        return false
+        return isSpellUsableSafe(spellID)
     end
-    return IsUsableSpell(spellID)
+    return isSpellUsableSafe(spellID)
 end
 
 local function getGroupUnits()
@@ -352,7 +394,7 @@ local function getLifebloomTargetThreshold()
 
     -- Legacy fallback for old spell-based talent IDs.
     local undergrowthID = resolveSpellID("UndergrowthTalent")
-    if undergrowthID and IsPlayerSpell(undergrowthID) then
+    if undergrowthID and isSpellKnownSafe(undergrowthID) then
         return 2
     end
     return 1
@@ -749,7 +791,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
                     msg(key .. " -> missing spell id; node-based detection unavailable")
                 end
             elseif spellID then
-                local known = IsPlayerSpell and IsPlayerSpell(spellID)
+                local known = isSpellKnownSafe(spellID)
                 if known then
                     msg(key .. " -> " .. spellID .. " (known)")
                 else
