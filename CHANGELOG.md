@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.7] - 2026-03-08
+
+### Changed
+- Removed spell name text under icons for a cleaner icon-only display.
+- Kept in-icon overlay information intact (including Atonement count and charge/unknown overlays).
+
+## [1.0.6] - 2026-03-08
+
+### Changed
+- Discipline Atonement entry now keeps the label as `Atonement` and displays the active Atonement count inside the icon overlay.
+- Added entry-level icon counter support so future spec-specific counters can be shown in-icon without changing label text.
+
+## [1.0.5] - 2026-03-08
+
+### Added
+- Discipline `Power Word: Shield` priority tracking and display.
+
+### Changed
+- Discipline Atonement behavior now always displays and tracks active Atonement count.
+- Preservation Evoker `Reversion` and `Echo` logic no longer relies strictly on mouseover; group-aware fallback is used when no friendly mouseover exists.
+
+### Fixed
+- Resolved missing `Power Word: Shield` display for Discipline Priest.
+- Reduced unintuitive Preservation behavior where core entries only appeared while hovering friendly unit frames.
+
 ## [1.0.4] - 2026-03-08
 
 ### Added

@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.4"
+local ADDON_VERSION = "1.0.7"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -68,6 +68,7 @@ local SPELLS = {
     Lifespark = { 443176 },
 
     Atonement = { 194384 },
+    PowerWordShield = { 17 },
     PrayerOfMending = { 33076 },
     Halo = { 120517 },
     Lightweaver = { 390993 },
@@ -312,6 +313,16 @@ local function countAuraInGroup(spellID, fromPlayerOnly)
     return n
 end
 
+local function countAliveGroupUnits()
+    local n = 0
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            n = n + 1
+        end
+    end
+    return n
+end
+
 local function getSpecID()
     local specIndex = GetSpecialization()
     if not specIndex then
@@ -380,6 +391,7 @@ local function ensureIcon(index)
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("TOP", frame, "BOTTOM", 0, -1)
     label:SetJustifyH("CENTER")
+    label:Hide()
     frame.label = label
 
     local chargeText = frame:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
@@ -413,7 +425,7 @@ local function buildEntries()
     local mouseover = getFriendlyMouseover()
     local entries = {}
 
-    local function addEntry(name, spellID)
+    local function addEntry(name, spellID, iconCount)
         if not spellID then
             return
         end
@@ -421,6 +433,7 @@ local function buildEntries()
             name = name,
             spellID = spellID,
             icon = getSpellTexture(spellID) or 136243,
+            iconCount = iconCount,
         }
     end
 
@@ -478,11 +491,21 @@ local function buildEntries()
         end
     elseif specID == 1468 then
         local reversionID = resolveSpellID("Reversion")
-        if mouseover and reversionID and getCooldownReady(reversionID) and not isAuraActive(mouseover, reversionID, true, true) then
-            addEntry("Reversion", reversionID)
+        if reversionID and getCooldownReady(reversionID) then
+            if mouseover then
+                if not isAuraActive(mouseover, reversionID, true, true) then
+                    addEntry("Reversion", reversionID)
+                end
+            else
+                local alive = countAliveGroupUnits()
+                local activeReversions = countAuraInGroup(reversionID, true)
+                if activeReversions < alive then
+                    addEntry("Reversion", reversionID)
+                end
+            end
         end
         local echoID = resolveSpellID("Echo")
-        if mouseover and echoID and getCooldownReady(echoID) and getEssenceCount() >= 2 then
+        if echoID and getCooldownReady(echoID) and getEssenceCount() >= 2 then
             addEntry("Echo", echoID)
         end
         local lifesparkID = resolveSpellID("Lifespark")
@@ -491,8 +514,14 @@ local function buildEntries()
         end
     elseif specID == 256 then
         local atonementID = resolveSpellID("Atonement")
-        if atonementID and countAuraInGroup(atonementID, true) < 5 then
-            addEntry("Atonement", atonementID)
+        local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
+        if atonementID then
+            addEntry("Atonement", atonementID, tostring(atonementCount))
+        end
+
+        local pwsID = resolveSpellID("PowerWordShield")
+        if pwsID and getCooldownReady(pwsID) then
+            addEntry("Power Word: Shield", pwsID)
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
@@ -539,7 +568,8 @@ local function layoutEntries(entries)
         f:ClearAllPoints()
         f:SetPoint("LEFT", root, "LEFT", (i - 1) * (size + spacing), 0)
         f.icon:SetTexture(entries[i].icon)
-        f.label:SetText(entries[i].name)
+        -- Intentionally hide spell names; only icon and in-icon counters are shown.
+        f.label:SetText("")
 
         if C_Spell and C_Spell.GetSpellCooldown then
             local info = C_Spell.GetSpellCooldown(entries[i].spellID)
@@ -555,7 +585,10 @@ local function layoutEntries(entries)
             f.cooldown:Clear()
         end
 
-        if HealingPriorityMouseDB.showCharges then
+        if entries[i].iconCount then
+            f.chargeText:SetText(entries[i].iconCount)
+            f.chargeText:Show()
+        elseif HealingPriorityMouseDB.showCharges then
             local charges = getSafeCharges(entries[i].spellID)
             if charges and charges.unknown then
                 f.chargeText:SetText("?")
@@ -697,7 +730,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             "RenewingMist", "StrengthOfTheBlackOx",
             "WaterShield", "HealingRain", "Riptide", "CloudburstTotem",
             "Reversion", "Echo", "Lifespark",
-            "Atonement", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
+            "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
         }
         for _, key in ipairs(keys) do
             local spellID = resolveSpellID(key)
