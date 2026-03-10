@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.10] - 2026-03-09
+
+### Added
+- Added `/hpm version` command to print the currently running addon version in chat.
+
+### Notes
+- This release is intentionally scoped to version reporting command availability and release alignment.
+
 ## [1.0.8] - 2026-03-08
 
 ### Fixed

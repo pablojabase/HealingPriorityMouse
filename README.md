@@ -13,6 +13,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 ## Slash Commands
 
 - `/hpm` or `/healingprioritymouse`: print status and active options
+- `/hpm version`: print current addon version
 - `/hpm toggle`: enable/disable addon display
 - `/hpm undergrowth on|off|auto`: control Lifebloom target count logic
 - `/hpm scale <number>`: set icon scale (example: `/hpm scale 1.2`)
