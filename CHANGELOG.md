@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.11] - 2026-03-10
+
+### Fixed
+- CurseForge automatic packaging now uses this file (`CHANGELOG.md`) as the published changelog instead of commit history.
+
+### Security/Privacy
+- Prevents commit metadata (such as author email addresses) from appearing in the CurseForge app changelog feed.
+
 ## [1.0.10] - 2026-03-09
 
 ### Added

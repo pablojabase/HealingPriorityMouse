@@ -1,4 +1,5 @@
 package-as: HealingPriorityMouse
+manual-changelog: CHANGELOG.md
 ignore:
   - "*.zip"
   - ".gitignore"
