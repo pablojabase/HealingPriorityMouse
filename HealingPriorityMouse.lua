@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.10"
+local ADDON_VERSION = "1.0.9"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -290,6 +290,19 @@ local function isSpellKnownSafe(spellID)
     return false
 end
 
+local function isSpellUsableSafe(spellID)
+    if not IsUsableSpell then
+        return false
+    end
+    local ok, usable = pcall(function()
+        return IsUsableSpell(spellID)
+    end)
+    if ok then
+        return usable and true or false
+    end
+    return false
+end
+
 local function isCooldownDurationReady(duration, isOnGCD)
     if duration and numberLE(duration, 0) then
         return true
@@ -305,50 +318,25 @@ local function getCooldownReady(spellID)
         return false
     end
 
-    local cooldownInfoWasReadable = false
-
     if C_Spell and C_Spell.GetSpellCooldown then
         local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-        if ok and info then
-            local duration = plainNumber(info.duration)
-            local isOnGCD = isTrueFlag(info.isOnGCD, false)
-            if duration then
-                cooldownInfoWasReadable = true
-                return isCooldownDurationReady(duration, isOnGCD)
-            end
-            -- If cooldown payload exists but duration is protected/unreadable, do not hide spell.
-            if not isNilValue(info.duration) then
-                return true
-            end
+        if not ok or not info then
+            return isSpellUsableSafe(spellID)
         end
-    end
-
-    -- Legacy fallback can be more stable than structured cooldown data in combat.
-    if GetSpellCooldown then
-        local ok, startTime, duration, enabled = pcall(GetSpellCooldown, spellID)
-        if ok and not isNilValue(duration) then
-            local dur = plainNumber(duration)
-            if dur then
-                cooldownInfoWasReadable = true
-                local start = plainNumber(startTime)
-                local isOnGCD = false
-                if start and dur and numberGT(dur, 0) and numberLE(dur, 1.7) then
-                    isOnGCD = true
-                end
-                if enabled == 0 then
-                    return false
-                end
-                return isCooldownDurationReady(dur, isOnGCD)
-            end
+        -- Midnight can return secret booleans; avoid direct truth tests on API fields.
+        if isFalseFlag(info.isEnabled, false) then
+            return isSpellUsableSafe(spellID)
         end
+        local duration = plainNumber(info.duration)
+        if duration and numberLE(duration, 0) then
+            return true
+        end
+        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+            return true
+        end
+        return isSpellUsableSafe(spellID)
     end
-
-    -- When cooldown fields are unreadable in combat, prefer showing rather than hiding.
-    if not cooldownInfoWasReadable then
-        return true
-    end
-
-    return true
+    return isSpellUsableSafe(spellID)
 end
 
 local function getGroupUnits()
