@@ -2,7 +2,7 @@
 ## Title: HealingPriorityMouse
 ## Notes: Mouse-anchored healing priority helper (display-only)
 ## Author: Local Conversion
-## Version: 1.0.4
+## Version: @project-version@
 ## SavedVariables: HealingPriorityMouseDB
 
 HealingPriorityMouse.lua
