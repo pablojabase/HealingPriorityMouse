@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.2] - 2026-03-12
+
+### Added
+- Added `/hpm debug on|off|dump [n]|clear` internal logging tools for combat troubleshooting.
+- Added PW:S-focused decision tracing (live cooldown read, cache fallback, usability fallback, and entry decision logging).
+
+### Notes
+- This beta is intended to capture high-signal diagnostics for in-combat Power Word: Shield icon suppression.
+
 ## [1.0.13-beta.1] - 2026-03-12
 
 ### Changed

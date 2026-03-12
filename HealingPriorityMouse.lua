@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.1"
+local ADDON_VERSION = "1.0.13-beta.2"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -11,6 +11,9 @@ local defaults = {
     spellNamePosition = "bottom", -- bottom | top
     undergrowthMode = "auto", -- auto | on | off
     showCharges = true,
+    debugLogEnabled = false,
+    debugLogMax = 300,
+    debugLog = {},
 }
 
 local function copyDefaults(dst, src)
@@ -28,6 +31,53 @@ end
 
 local function msg(text)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ccffHealingPriorityMouse|r: " .. tostring(text))
+end
+
+local function pushDebugLog(line)
+    if not HealingPriorityMouseDB.debugLogEnabled then
+        return
+    end
+    if type(HealingPriorityMouseDB.debugLog) ~= "table" then
+        HealingPriorityMouseDB.debugLog = {}
+    end
+
+    local ts = date("%H:%M:%S")
+    local record = "[" .. ts .. "] " .. tostring(line)
+    table.insert(HealingPriorityMouseDB.debugLog, record)
+
+    local maxEntries = tonumber(HealingPriorityMouseDB.debugLogMax) or 300
+    if maxEntries < 50 then
+        maxEntries = 50
+    end
+    while #HealingPriorityMouseDB.debugLog > maxEntries do
+        table.remove(HealingPriorityMouseDB.debugLog, 1)
+    end
+end
+
+local function clearDebugLog()
+    HealingPriorityMouseDB.debugLog = {}
+end
+
+local function dumpDebugLog(limit)
+    local logs = HealingPriorityMouseDB.debugLog
+    if type(logs) ~= "table" or #logs == 0 then
+        msg("debug log is empty")
+        return
+    end
+
+    local n = tonumber(limit) or 40
+    if n < 1 then
+        n = 1
+    end
+    if n > 200 then
+        n = 200
+    end
+
+    local startIndex = math.max(1, #logs - n + 1)
+    msg("debug log dump (" .. tostring(#logs - startIndex + 1) .. "/" .. tostring(#logs) .. "):")
+    for i = startIndex, #logs do
+        msg(logs[i])
+    end
 end
 
 local function getSpellName(spellID)
@@ -80,6 +130,29 @@ local SPELLS = {
 
 local resolvedSpells = {}
 local cooldownCache = {}
+local pwsDebugGate = {
+    lastKey = nil,
+    lastAt = 0,
+}
+
+local function isPowerWordShieldSpell(spellID)
+    local pwsID = resolveSpellID("PowerWordShield")
+    return pwsID and spellID == pwsID
+end
+
+local function logPwsDecision(key, text)
+    if not HealingPriorityMouseDB.debugLogEnabled then
+        return
+    end
+    local now = GetTime()
+    local dedupeKey = tostring(key or "") .. ":" .. tostring(text or "")
+    if pwsDebugGate.lastKey == dedupeKey and (now - (pwsDebugGate.lastAt or 0)) < 0.25 then
+        return
+    end
+    pwsDebugGate.lastKey = dedupeKey
+    pwsDebugGate.lastAt = now
+    pushDebugLog("PWS " .. tostring(text))
+end
 
 local function resolveSpellID(key)
     if resolvedSpells[key] ~= nil then
@@ -348,6 +421,14 @@ local function updateCooldownCache(spellID)
         endTime = endTime,
         updatedAt = GetTime(),
     }
+
+    if isPowerWordShieldSpell(spellID) then
+        logPwsDecision("cache-update", "cache update: ready=" .. tostring(ready)
+            .. ", start=" .. tostring(startTime)
+            .. ", duration=" .. tostring(duration)
+            .. ", isOnGCD=" .. tostring(isOnGCD)
+            .. ", inCombat=" .. tostring(UnitAffectingCombat("player")))
+    end
 end
 
 local function getCachedCooldownReady(spellID)
@@ -374,7 +455,12 @@ local function getCooldownReady(spellID, options)
     options = options or {}
     local allowCacheFallback = options.allowCacheFallback and true or false
 
+    local isPws = isPowerWordShieldSpell(spellID)
+
     if not isSpellKnownSafe(spellID) then
+        if isPws then
+            logPwsDecision("known", "blocked: spell not known")
+        end
         return false
     end
 
@@ -384,26 +470,43 @@ local function getCooldownReady(spellID, options)
             if allowCacheFallback then
                 local cached = getCachedCooldownReady(spellID)
                 if cached ~= nil then
+                    if isPws then
+                        logPwsDecision("api-fail-cache", "api read failed -> cache=" .. tostring(cached))
+                    end
                     return cached
                 end
             end
-            return isSpellUsableSafe(spellID)
+            local usableFallback = isSpellUsableSafe(spellID)
+            if isPws then
+                logPwsDecision("api-fail-usable", "api read failed -> usable=" .. tostring(usableFallback))
+            end
+            return usableFallback
         end
         -- Midnight can return secret booleans; avoid direct truth tests on API fields.
         if isFalseFlag(info.isEnabled, false) then
             if allowCacheFallback then
                 local cached = getCachedCooldownReady(spellID)
                 if cached ~= nil then
+                    if isPws then
+                        logPwsDecision("disabled-cache", "isEnabled=false -> cache=" .. tostring(cached))
+                    end
                     return cached
                 end
             end
-            return isSpellUsableSafe(spellID)
+            local usableFallback = isSpellUsableSafe(spellID)
+            if isPws then
+                logPwsDecision("disabled-usable", "isEnabled=false -> usable=" .. tostring(usableFallback))
+            end
+            return usableFallback
         end
         local duration = plainNumber(info.duration)
         local isOnGCD = isTrueFlag(info.isOnGCD, false)
         if isCooldownDurationReady(duration, isOnGCD) then
             if allowCacheFallback then
                 updateCooldownCache(spellID)
+            end
+            if isPws then
+                logPwsDecision("live-ready", "live ready: duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
             end
             return true
         end
@@ -412,21 +515,37 @@ local function getCooldownReady(spellID, options)
             updateCooldownCache(spellID)
             local cached = getCachedCooldownReady(spellID)
             if cached ~= nil then
+                if isPws then
+                    logPwsDecision("not-ready-cache", "live not ready -> cache=" .. tostring(cached)
+                        .. ", duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
+                end
                 return cached
             end
         end
 
-        return isSpellUsableSafe(spellID)
+        local usableFallback = isSpellUsableSafe(spellID)
+        if isPws then
+            logPwsDecision("not-ready-usable", "live not ready -> usable=" .. tostring(usableFallback)
+                .. ", duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
+        end
+        return usableFallback
     end
 
     if allowCacheFallback then
         local cached = getCachedCooldownReady(spellID)
         if cached ~= nil then
+            if isPws then
+                logPwsDecision("no-cspell-cache", "no C_Spell -> cache=" .. tostring(cached))
+            end
             return cached
         end
     end
 
-    return isSpellUsableSafe(spellID)
+    local usableFallback = isSpellUsableSafe(spellID)
+    if isPws then
+        logPwsDecision("no-cspell-usable", "no C_Spell -> usable=" .. tostring(usableFallback))
+    end
+    return usableFallback
 end
 
 local function getGroupUnits()
@@ -712,8 +831,14 @@ local function buildEntries()
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
-        if pwsID and getCooldownReady(pwsID, { allowCacheFallback = true }) then
+        local pwsReady = pwsID and getCooldownReady(pwsID, { allowCacheFallback = true })
+        if pwsID and pwsReady then
             addEntry("Power Word: Shield", pwsID)
+        end
+        if pwsID then
+            logPwsDecision("entry", "entry decision: ready=" .. tostring(pwsReady)
+                .. ", inCombat=" .. tostring(UnitAffectingCombat("player"))
+                .. ", atonementCount=" .. tostring(atonementCount))
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
@@ -1279,6 +1404,37 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
                 msg(key .. " -> missing on this client")
             end
         end
+        return
+    end
+
+    if cmd == "debug" then
+        if rest == "on" then
+            HealingPriorityMouseDB.debugLogEnabled = true
+            msg("debug log enabled")
+            pushDebugLog("debug enabled")
+            return
+        end
+        if rest == "off" then
+            pushDebugLog("debug disabled")
+            HealingPriorityMouseDB.debugLogEnabled = false
+            msg("debug log disabled")
+            return
+        end
+        if rest == "clear" then
+            clearDebugLog()
+            msg("debug log cleared")
+            return
+        end
+        local dumpCount = rest:match("^dump%s*(%d*)$")
+        if dumpCount ~= nil then
+            if dumpCount == "" then
+                dumpDebugLog(40)
+            else
+                dumpDebugLog(tonumber(dumpCount))
+            end
+            return
+        end
+        msg("usage: /hpm debug on|off|dump [n]|clear")
         return
     end
 
