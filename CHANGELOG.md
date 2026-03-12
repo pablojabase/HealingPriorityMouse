@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.1] - 2026-03-12
+
+### Changed
+- Added event-driven internal cooldown caching for Discipline `Power Word: Shield` to improve icon readiness stability during combat.
+
+### Fixed
+- Reduced cases where `Power Word: Shield` icon incorrectly disappears in combat despite the spell being available.
+
+### Notes
+- This is a beta pipeline validation release focused on combat cooldown-read consistency.
+
 ## [1.0.12] - 2026-03-11
 
 ### Added

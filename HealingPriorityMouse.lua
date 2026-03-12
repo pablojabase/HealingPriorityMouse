@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.12"
+local ADDON_VERSION = "1.0.13-beta.1"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -79,6 +79,7 @@ local SPELLS = {
 }
 
 local resolvedSpells = {}
+local cooldownCache = {}
 
 local function resolveSpellID(key)
     if resolvedSpells[key] ~= nil then
@@ -316,7 +317,63 @@ local function isCooldownDurationReady(duration, isOnGCD)
     return false
 end
 
-local function getCooldownReady(spellID)
+local function updateCooldownCache(spellID)
+    if not spellID then
+        return
+    end
+    if not (C_Spell and C_Spell.GetSpellCooldown) then
+        return
+    end
+
+    local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
+    if not ok or not info then
+        return
+    end
+
+    local duration = plainNumber(info.duration)
+    local startTime = plainNumber(info.startTime)
+    local isOnGCD = isTrueFlag(info.isOnGCD, false)
+    local ready = isCooldownDurationReady(duration, isOnGCD)
+    local endTime = nil
+
+    if startTime and duration then
+        endTime = startTime + duration
+        if numberLE(endTime, GetTime()) then
+            ready = true
+        end
+    end
+
+    cooldownCache[spellID] = {
+        ready = ready,
+        endTime = endTime,
+        updatedAt = GetTime(),
+    }
+end
+
+local function getCachedCooldownReady(spellID)
+    local cached = cooldownCache[spellID]
+    if not cached then
+        return nil
+    end
+
+    if cached.endTime and numberLE(cached.endTime, GetTime()) then
+        return true
+    end
+
+    return cached.ready and true or false
+end
+
+local function refreshTrackedCooldownCaches()
+    local pwsID = resolveSpellID("PowerWordShield")
+    if pwsID then
+        updateCooldownCache(pwsID)
+    end
+end
+
+local function getCooldownReady(spellID, options)
+    options = options or {}
+    local allowCacheFallback = options.allowCacheFallback and true or false
+
     if not isSpellKnownSafe(spellID) then
         return false
     end
@@ -324,21 +381,51 @@ local function getCooldownReady(spellID)
     if C_Spell and C_Spell.GetSpellCooldown then
         local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
         if not ok or not info then
+            if allowCacheFallback then
+                local cached = getCachedCooldownReady(spellID)
+                if cached ~= nil then
+                    return cached
+                end
+            end
             return isSpellUsableSafe(spellID)
         end
         -- Midnight can return secret booleans; avoid direct truth tests on API fields.
         if isFalseFlag(info.isEnabled, false) then
+            if allowCacheFallback then
+                local cached = getCachedCooldownReady(spellID)
+                if cached ~= nil then
+                    return cached
+                end
+            end
             return isSpellUsableSafe(spellID)
         end
         local duration = plainNumber(info.duration)
-        if duration and numberLE(duration, 0) then
+        local isOnGCD = isTrueFlag(info.isOnGCD, false)
+        if isCooldownDurationReady(duration, isOnGCD) then
+            if allowCacheFallback then
+                updateCooldownCache(spellID)
+            end
             return true
         end
-        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
-            return true
+
+        if allowCacheFallback then
+            updateCooldownCache(spellID)
+            local cached = getCachedCooldownReady(spellID)
+            if cached ~= nil then
+                return cached
+            end
         end
+
         return isSpellUsableSafe(spellID)
     end
+
+    if allowCacheFallback then
+        local cached = getCachedCooldownReady(spellID)
+        if cached ~= nil then
+            return cached
+        end
+    end
+
     return isSpellUsableSafe(spellID)
 end
 
@@ -625,7 +712,7 @@ local function buildEntries()
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
-        if pwsID and getCooldownReady(pwsID) then
+        if pwsID and getCooldownReady(pwsID, { allowCacheFallback = true }) then
             addEntry("Power Word: Shield", pwsID)
         end
     elseif specID == 257 then
@@ -1003,6 +1090,7 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
@@ -1014,9 +1102,18 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             return
         end
         copyDefaults(HealingPriorityMouseDB, defaults)
+        refreshTrackedCooldownCaches()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
+    end
+
+    if event == "SPELL_UPDATE_COOLDOWN"
+        or event == "SPELLS_CHANGED"
+        or event == "PLAYER_SPECIALIZATION_CHANGED"
+        or event == "PLAYER_ENTERING_WORLD"
+        or event == "TRAIT_CONFIG_UPDATED" then
+        refreshTrackedCooldownCaches()
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
