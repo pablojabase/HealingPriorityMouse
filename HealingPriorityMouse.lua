@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.2"
+local ADDON_VERSION = "1.0.13-beta.3"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -134,6 +134,7 @@ local pwsDebugGate = {
     lastKey = nil,
     lastAt = 0,
 }
+local resolveSpellID
 
 local function isPowerWordShieldSpell(spellID)
     local pwsID = resolveSpellID("PowerWordShield")
@@ -154,7 +155,7 @@ local function logPwsDecision(key, text)
     pushDebugLog("PWS " .. tostring(text))
 end
 
-local function resolveSpellID(key)
+resolveSpellID = function(key)
     if resolvedSpells[key] ~= nil then
         return resolvedSpells[key]
     end

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.3] - 2026-03-12
+
+### Fixed
+- Fixed startup/runtime crash caused by calling `resolveSpellID` before local declaration in PW:S debug instrumentation.
+
+### Notes
+- Hotfix beta release to restore addon loading and allow PW:S debug capture.
+
 ## [1.0.13-beta.2] - 2026-03-12
 
 ### Added
