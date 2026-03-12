@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.4] - 2026-03-12
+
+### Fixed
+- Fixed Discipline `Power Word: Shield` readiness false negatives when in-combat cooldown payloads return missing (`startTime=nil`, `duration=nil`) values.
+
+### Changed
+- Added resilient cooldown fallback order for missing payloads: cache -> legacy `GetSpellCooldown` -> `IsUsableSpell`.
+- Added `missingPayload` flag to PW:S debug logs for clearer combat diagnostics.
+
 ## [1.0.13-beta.3] - 2026-03-12
 
 ### Fixed

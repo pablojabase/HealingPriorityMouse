@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.3"
+local ADDON_VERSION = "1.0.13-beta.4"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -391,6 +391,40 @@ local function isCooldownDurationReady(duration, isOnGCD)
     return false
 end
 
+local function getLegacyCooldownReady(spellID)
+    if not GetSpellCooldown then
+        return nil
+    end
+
+    local ok, startTime, duration, enabled = pcall(GetSpellCooldown, spellID)
+    if not ok then
+        return nil
+    end
+
+    if enabled == 0 then
+        return false
+    end
+
+    local safeStart = plainNumber(startTime)
+    local safeDuration = plainNumber(duration)
+    if safeDuration and numberLE(safeDuration, 0) then
+        return true
+    end
+    if safeStart and safeDuration and numberLE(safeStart + safeDuration, GetTime()) then
+        return true
+    end
+
+    if safeDuration ~= nil then
+        return false
+    end
+
+    return nil
+end
+
+local function isMissingCooldownPayload(startTime, duration)
+    return startTime == nil and duration == nil
+end
+
 local function updateCooldownCache(spellID)
     if not spellID then
         return
@@ -409,11 +443,21 @@ local function updateCooldownCache(spellID)
     local isOnGCD = isTrueFlag(info.isOnGCD, false)
     local ready = isCooldownDurationReady(duration, isOnGCD)
     local endTime = nil
+    local missingPayload = isMissingCooldownPayload(startTime, duration)
 
     if startTime and duration then
         endTime = startTime + duration
         if numberLE(endTime, GetTime()) then
             ready = true
+        end
+    end
+
+    if missingPayload then
+        local legacyReady = getLegacyCooldownReady(spellID)
+        if legacyReady ~= nil then
+            ready = legacyReady
+        else
+            ready = isSpellUsableSafe(spellID)
         end
     end
 
@@ -428,6 +472,7 @@ local function updateCooldownCache(spellID)
             .. ", start=" .. tostring(startTime)
             .. ", duration=" .. tostring(duration)
             .. ", isOnGCD=" .. tostring(isOnGCD)
+            .. ", missingPayload=" .. tostring(missingPayload)
             .. ", inCombat=" .. tostring(UnitAffectingCombat("player")))
     end
 end
@@ -501,7 +546,9 @@ local function getCooldownReady(spellID, options)
             return usableFallback
         end
         local duration = plainNumber(info.duration)
+        local startTime = plainNumber(info.startTime)
         local isOnGCD = isTrueFlag(info.isOnGCD, false)
+        local missingPayload = isMissingCooldownPayload(startTime, duration)
         if isCooldownDurationReady(duration, isOnGCD) then
             if allowCacheFallback then
                 updateCooldownCache(spellID)
@@ -510,6 +557,36 @@ local function getCooldownReady(spellID, options)
                 logPwsDecision("live-ready", "live ready: duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
             end
             return true
+        end
+
+        if missingPayload then
+            if allowCacheFallback then
+                updateCooldownCache(spellID)
+                local cached = getCachedCooldownReady(spellID)
+                if cached ~= nil then
+                    if isPws then
+                        logPwsDecision("missing-cache", "missing payload -> cache=" .. tostring(cached)
+                            .. ", isOnGCD=" .. tostring(isOnGCD))
+                    end
+                    return cached
+                end
+            end
+
+            local legacyReady = getLegacyCooldownReady(spellID)
+            if legacyReady ~= nil then
+                if isPws then
+                    logPwsDecision("missing-legacy", "missing payload -> legacy=" .. tostring(legacyReady)
+                        .. ", isOnGCD=" .. tostring(isOnGCD))
+                end
+                return legacyReady
+            end
+
+            local usableFallback = isSpellUsableSafe(spellID)
+            if isPws then
+                logPwsDecision("missing-usable", "missing payload -> usable=" .. tostring(usableFallback)
+                    .. ", isOnGCD=" .. tostring(isOnGCD))
+            end
+            return usableFallback
         end
 
         if allowCacheFallback then
