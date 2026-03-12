@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.7] - 2026-03-12
+
+### Fixed
+- Fixed login-time `ADDON_ACTION_FORBIDDEN` involving protected `Frame:RegisterEvent()` calls.
+
+### Changed
+- Runtime event registration now initializes during addon startup (`ADDON_LOADED`) instead of in the main chunk.
+
 ## [1.0.13-beta.6] - 2026-03-12
 
 ### Fixed
