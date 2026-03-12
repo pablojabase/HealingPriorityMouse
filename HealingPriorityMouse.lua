@@ -1,11 +1,14 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.11"
+local ADDON_VERSION = "1.0.12"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
 local defaults = {
     enabled = true,
     scale = 1.0,
+    opacity = 1.0,
+    showSpellNames = false,
+    spellNamePosition = "bottom", -- bottom | top
     undergrowthMode = "auto", -- auto | on | off
     showCharges = true,
 }
@@ -417,6 +420,59 @@ root:SetFrameStrata("HIGH")
 root:Hide()
 
 local iconFrames = {}
+local optionsFrame
+local optionsControls
+
+local function clampScale(value)
+    if not value then
+        return nil
+    end
+    if value < 0.6 then
+        return 0.6
+    end
+    if value > 3.0 then
+        return 3.0
+    end
+    return value
+end
+
+local function clampOpacity(value)
+    if not value then
+        return nil
+    end
+    if value < 0 then
+        return 0
+    end
+    if value > 1 then
+        return 1
+    end
+    return value
+end
+
+local function setScaleValue(value)
+    local clamped = clampScale(value)
+    if not clamped then
+        return false
+    end
+    HealingPriorityMouseDB.scale = clamped
+    return true
+end
+
+local function setOpacityPercent(value)
+    if not value then
+        return false
+    end
+    local pct = value
+    if pct > 1 then
+        pct = pct / 100
+    end
+    local clamped = clampOpacity(pct)
+    if not clamped then
+        return false
+    end
+    HealingPriorityMouseDB.opacity = clamped
+    return true
+end
 
 local function ensureIcon(index)
     if iconFrames[index] then
@@ -424,11 +480,7 @@ local function ensureIcon(index)
     end
     local frame = CreateFrame("Frame", nil, root, "BackdropTemplate")
     frame:SetSize(26, 26)
-    frame:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    frame:SetBackdropBorderColor(0.1, 0.45, 1.0, 0.95)
+    frame:SetBackdrop(nil)
 
     local tex = frame:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
@@ -621,8 +673,24 @@ local function layoutEntries(entries)
         f:ClearAllPoints()
         f:SetPoint("LEFT", root, "LEFT", (i - 1) * (size + spacing), 0)
         f.icon:SetTexture(entries[i].icon)
-        -- Intentionally hide spell names; only icon and in-icon counters are shown.
-        f.label:SetText("")
+
+        local opacity = clampOpacity(tonumber(HealingPriorityMouseDB.opacity) or 1.0) or 1.0
+        f.icon:SetAlpha(opacity)
+        f.cooldown:SetAlpha(opacity)
+
+        if HealingPriorityMouseDB.showSpellNames then
+            f.label:ClearAllPoints()
+            if HealingPriorityMouseDB.spellNamePosition == "top" then
+                f.label:SetPoint("BOTTOM", f, "TOP", 0, 1)
+            else
+                f.label:SetPoint("TOP", f, "BOTTOM", 0, -1)
+            end
+            f.label:SetText(entries[i].name or "")
+            f.label:Show()
+        else
+            f.label:SetText("")
+            f.label:Hide()
+        end
 
         if C_Spell and C_Spell.GetSpellCooldown then
             local info = C_Spell.GetSpellCooldown(entries[i].spellID)
@@ -680,6 +748,255 @@ local function refresh()
     layoutEntries(buildEntries())
 end
 
+local function refreshOptionsControls()
+    if not optionsFrame or not optionsControls then
+        return
+    end
+
+    local db = HealingPriorityMouseDB
+    optionsControls.enabled:SetChecked(db.enabled and true or false)
+    optionsControls.charges:SetChecked(db.showCharges and true or false)
+    optionsControls.showNames:SetChecked(db.showSpellNames and true or false)
+
+    UIDropDownMenu_SetSelectedValue(optionsControls.undergrowth, db.undergrowthMode)
+    UIDropDownMenu_SetSelectedValue(optionsControls.namePosition, db.spellNamePosition)
+
+    local scaleValue = clampScale(tonumber(db.scale) or 1.0) or 1.0
+    optionsControls.scaleSlider:SetValue(scaleValue)
+    optionsControls.scaleInput:SetText(string.format("%.2f", scaleValue))
+
+    local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
+    optionsControls.opacitySlider:SetValue(opacityValue)
+    optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+end
+
+local function createOptionsFrame()
+    if optionsFrame then
+        return optionsFrame
+    end
+
+    local frame = CreateFrame("Frame", "HealingPriorityMouseOptionsFrame", UIParent, "BasicFrameTemplateWithInset")
+    frame:SetSize(430, 470)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+    end)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+    end)
+    frame:Hide()
+
+    frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    frame.title:SetPoint("LEFT", frame.TitleBg, "LEFT", 8, 0)
+    frame.title:SetText("HealingPriorityMouse Options")
+
+    local enabled = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    enabled:SetPoint("TOPLEFT", 16, -36)
+    enabled.Text:SetText("Enable addon display")
+    enabled:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.enabled = self:GetChecked() and true or false
+        refresh()
+    end)
+
+    local charges = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    charges:SetPoint("TOPLEFT", enabled, "BOTTOMLEFT", 0, -8)
+    charges.Text:SetText("Show charges overlay")
+    charges:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.showCharges = self:GetChecked() and true or false
+        refresh()
+    end)
+
+    local showNames = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    showNames:SetPoint("TOPLEFT", charges, "BOTTOMLEFT", 0, -8)
+    showNames.Text:SetText("Show spell names")
+    showNames:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.showSpellNames = self:GetChecked() and true or false
+        refresh()
+    end)
+
+    local namePositionLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    namePositionLabel:SetPoint("TOPLEFT", showNames, "BOTTOMLEFT", 0, -22)
+    namePositionLabel:SetText("Spell name position")
+
+    local namePosition = CreateFrame("Frame", "HealingPriorityMouseNamePositionDropdown", frame, "UIDropDownMenuTemplate")
+    namePosition:SetPoint("TOPLEFT", namePositionLabel, "BOTTOMLEFT", -16, -4)
+    UIDropDownMenu_SetWidth(namePosition, 120)
+    UIDropDownMenu_Initialize(namePosition, function(self, level)
+        local function addOption(label, value)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.value = value
+            info.checked = (HealingPriorityMouseDB.spellNamePosition == value)
+            info.func = function()
+                HealingPriorityMouseDB.spellNamePosition = value
+                UIDropDownMenu_SetSelectedValue(self, value)
+                refresh()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        addOption("Under icon", "bottom")
+        addOption("Above icon", "top")
+    end)
+
+    local undergrowthLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    undergrowthLabel:SetPoint("TOPLEFT", namePosition, "BOTTOMLEFT", 16, -18)
+    undergrowthLabel:SetText("Undergrowth mode")
+
+    local undergrowth = CreateFrame("Frame", "HealingPriorityMouseUndergrowthDropdown", frame, "UIDropDownMenuTemplate")
+    undergrowth:SetPoint("TOPLEFT", undergrowthLabel, "BOTTOMLEFT", -16, -4)
+    UIDropDownMenu_SetWidth(undergrowth, 120)
+    UIDropDownMenu_Initialize(undergrowth, function(self, level)
+        local function addOption(label, value)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.value = value
+            info.checked = (HealingPriorityMouseDB.undergrowthMode == value)
+            info.func = function()
+                HealingPriorityMouseDB.undergrowthMode = value
+                UIDropDownMenu_SetSelectedValue(self, value)
+                refresh()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        addOption("Auto", "auto")
+        addOption("On", "on")
+        addOption("Off", "off")
+    end)
+
+    local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    scaleLabel:SetPoint("TOPLEFT", undergrowth, "BOTTOMLEFT", 16, -20)
+    scaleLabel:SetText("Scale")
+
+    local scaleSlider = CreateFrame("Slider", "HealingPriorityMouseScaleSlider", frame, "OptionsSliderTemplate")
+    scaleSlider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -18)
+    scaleSlider:SetMinMaxValues(0.6, 3.0)
+    scaleSlider:SetValueStep(0.05)
+    scaleSlider:SetObeyStepOnDrag(true)
+    scaleSlider:SetWidth(240)
+    _G[scaleSlider:GetName() .. "Low"]:SetText("0.6")
+    _G[scaleSlider:GetName() .. "High"]:SetText("3.0")
+    _G[scaleSlider:GetName() .. "Text"]:SetText("")
+
+    local scaleInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    scaleInput:SetSize(56, 24)
+    scaleInput:SetPoint("LEFT", scaleSlider, "RIGHT", 16, 0)
+    scaleInput:SetAutoFocus(false)
+    scaleInput:SetNumeric(false)
+    scaleInput:SetScript("OnEnterPressed", function(self)
+        local val = tonumber(self:GetText())
+        if setScaleValue(val) then
+            local value = HealingPriorityMouseDB.scale
+            scaleSlider:SetValue(value)
+            self:SetText(string.format("%.2f", value))
+            refresh()
+        else
+            self:SetText(string.format("%.2f", HealingPriorityMouseDB.scale or 1.0))
+            msg("usage: scale 0.6-3.0")
+        end
+        self:ClearFocus()
+    end)
+    scaleInput:SetScript("OnEscapePressed", function(self)
+        self:SetText(string.format("%.2f", HealingPriorityMouseDB.scale or 1.0))
+        self:ClearFocus()
+    end)
+
+    scaleSlider:SetScript("OnValueChanged", function(self, value)
+        local rounded = math.floor((value * 100) + 0.5) / 100
+        if setScaleValue(rounded) then
+            scaleInput:SetText(string.format("%.2f", HealingPriorityMouseDB.scale))
+            refresh()
+        end
+    end)
+
+    local opacityLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    opacityLabel:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", 0, -24)
+    opacityLabel:SetText("Icon opacity (%)")
+
+    local opacitySlider = CreateFrame("Slider", "HealingPriorityMouseOpacitySlider", frame, "OptionsSliderTemplate")
+    opacitySlider:SetPoint("TOPLEFT", opacityLabel, "BOTTOMLEFT", 0, -18)
+    opacitySlider:SetMinMaxValues(0, 1)
+    opacitySlider:SetValueStep(0.01)
+    opacitySlider:SetObeyStepOnDrag(true)
+    opacitySlider:SetWidth(240)
+    _G[opacitySlider:GetName() .. "Low"]:SetText("0")
+    _G[opacitySlider:GetName() .. "High"]:SetText("100")
+    _G[opacitySlider:GetName() .. "Text"]:SetText("")
+
+    local opacityInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    opacityInput:SetSize(56, 24)
+    opacityInput:SetPoint("LEFT", opacitySlider, "RIGHT", 16, 0)
+    opacityInput:SetAutoFocus(false)
+    opacityInput:SetNumeric(false)
+    opacityInput:SetScript("OnEnterPressed", function(self)
+        local val = tonumber(self:GetText())
+        if setOpacityPercent(val) then
+            local value = HealingPriorityMouseDB.opacity or 1.0
+            opacitySlider:SetValue(value)
+            self:SetText(tostring(math.floor((value * 100) + 0.5)))
+            refresh()
+        else
+            local current = HealingPriorityMouseDB.opacity or 1.0
+            self:SetText(tostring(math.floor((current * 100) + 0.5)))
+            msg("usage: /hpm opacity 0-100")
+        end
+        self:ClearFocus()
+    end)
+    opacityInput:SetScript("OnEscapePressed", function(self)
+        local current = HealingPriorityMouseDB.opacity or 1.0
+        self:SetText(tostring(math.floor((current * 100) + 0.5)))
+        self:ClearFocus()
+    end)
+
+    opacitySlider:SetScript("OnValueChanged", function(self, value)
+        local rounded = math.floor((value * 100) + 0.5) / 100
+        if setOpacityPercent(rounded) then
+            local current = HealingPriorityMouseDB.opacity or 1.0
+            opacityInput:SetText(tostring(math.floor((current * 100) + 0.5)))
+            refresh()
+        end
+    end)
+
+    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    closeBtn:SetSize(90, 24)
+    closeBtn:SetPoint("BOTTOMRIGHT", -14, 12)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function()
+        frame:Hide()
+    end)
+
+    optionsControls = {
+        enabled = enabled,
+        charges = charges,
+        showNames = showNames,
+        namePosition = namePosition,
+        undergrowth = undergrowth,
+        scaleSlider = scaleSlider,
+        scaleInput = scaleInput,
+        opacitySlider = opacitySlider,
+        opacityInput = opacityInput,
+    }
+
+    frame:SetScript("OnShow", function()
+        refreshOptionsControls()
+    end)
+
+    optionsFrame = frame
+    return frame
+end
+
+local function openOptionsFrame()
+    local frame = createOptionsFrame()
+    refreshOptionsControls()
+    frame:Show()
+    frame:Raise()
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -726,6 +1043,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         HealingPriorityMouseDB.enabled = not HealingPriorityMouseDB.enabled
         msg("enabled = " .. tostring(HealingPriorityMouseDB.enabled))
         refresh()
+        refreshOptionsControls()
         return
     end
 
@@ -734,14 +1052,51 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
+    if cmd == "options" then
+        openOptionsFrame()
+        return
+    end
+
     if cmd == "undergrowth" then
         if rest == "on" or rest == "off" or rest == "auto" then
             HealingPriorityMouseDB.undergrowthMode = rest
             msg("undergrowthMode = " .. rest)
             refresh()
+            refreshOptionsControls()
             return
         end
         msg("usage: /hpm undergrowth on|off|auto")
+        return
+    end
+
+    if cmd == "names" then
+        if rest == "on" then
+            HealingPriorityMouseDB.showSpellNames = true
+            msg("showSpellNames = true")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        if rest == "off" then
+            HealingPriorityMouseDB.showSpellNames = false
+            msg("showSpellNames = false")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        msg("usage: /hpm names on|off")
+        return
+    end
+
+    if cmd == "namepos" then
+        if rest == "top" or rest == "bottom" then
+            HealingPriorityMouseDB.spellNamePosition = rest
+            msg("spellNamePosition = " .. rest)
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        msg("usage: /hpm namepos top|bottom")
         return
     end
 
@@ -750,12 +1105,14 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             HealingPriorityMouseDB.showCharges = true
             msg("showCharges = true")
             refresh()
+            refreshOptionsControls()
             return
         end
         if rest == "off" then
             HealingPriorityMouseDB.showCharges = false
             msg("showCharges = false")
             refresh()
+            refreshOptionsControls()
             return
         end
         msg("usage: /hpm charges on|off")
@@ -764,13 +1121,26 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
 
     if cmd == "scale" then
         local val = tonumber(rest)
-        if val and val >= 0.6 and val <= 2.0 then
-            HealingPriorityMouseDB.scale = val
-            msg("scale = " .. val)
+        if setScaleValue(val) then
+            msg("scale = " .. tostring(HealingPriorityMouseDB.scale))
             refresh()
+            refreshOptionsControls()
             return
         end
-        msg("usage: /hpm scale 0.6-2.0")
+        msg("usage: /hpm scale 0.6-3.0")
+        return
+    end
+
+    if cmd == "opacity" then
+        local val = tonumber(rest)
+        if setOpacityPercent(val) then
+            local pct = math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)
+            msg("opacity = " .. pct .. "%")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        msg("usage: /hpm opacity 0-100")
         return
     end
 
@@ -815,5 +1185,11 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
-    msg("enabled=" .. tostring(HealingPriorityMouseDB.enabled) .. ", scale=" .. tostring(HealingPriorityMouseDB.scale) .. ", undergrowthMode=" .. tostring(HealingPriorityMouseDB.undergrowthMode) .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges))
+    msg("enabled=" .. tostring(HealingPriorityMouseDB.enabled)
+        .. ", scale=" .. tostring(HealingPriorityMouseDB.scale)
+        .. ", opacity=" .. tostring(math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)) .. "%"
+        .. ", undergrowthMode=" .. tostring(HealingPriorityMouseDB.undergrowthMode)
+        .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges)
+        .. ", showSpellNames=" .. tostring(HealingPriorityMouseDB.showSpellNames)
+        .. ", spellNamePosition=" .. tostring(HealingPriorityMouseDB.spellNamePosition))
 end

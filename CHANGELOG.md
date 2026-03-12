@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.12] - 2026-03-11
+
+### Added
+- Added `/hpm options` in-game options window while preserving existing slash command workflow.
+- Added scale controls with both slider and numeric input, and expanded supported range to `0.6-3.0`.
+- Added icon opacity controls (slider + numeric input, `0-100%`) and `/hpm opacity` command.
+- Added spell-name visibility and position controls (`under/above icon`) in UI, plus `/hpm names` and `/hpm namepos` commands.
+- Added drag-to-move behavior for the options window.
+
+### Changed
+- Option changes now stay synchronized between the options window controls and slash command updates.
+
+### Fixed
+- Increased options window height so controls no longer render outside the panel.
+- Removed blue icon-border square artifact visible at low opacity.
+
 ## [1.0.11] - 2026-03-10
 
 ### Fixed

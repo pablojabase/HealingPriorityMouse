@@ -61,6 +61,12 @@ These are intentional and should not be changed accidentally:
 
 ## 6) Release and Versioning Workflow
 
+Release timing policy (strict):
+
+- During active feature work, do **not** bump version, do **not** push, and do **not** tag.
+- Batch feature work first; wait for user confirmation that work is complete.
+- Only at the very end, after a concise feature summary, apply version/changelog/release actions when the user explicitly says to proceed.
+
 When making a release-ready change:
 
 1. Update addon version in:
@@ -88,6 +94,7 @@ When making a release-ready change:
 4. Re-check for accidental behavior drift in the decisions listed above.
 5. Update docs/changelog/version when applicable.
 6. Report exactly what changed and where.
+7. Do not push, tag, or bump version unless user explicitly requests final release execution.
 
 ## 9) Bootstrap Prompt for New Conversations
 
