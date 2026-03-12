@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.6] - 2026-03-12
+
+### Fixed
+- Prevented Discipline `Power Word: Shield` readiness from dropping to false during combat when cooldown payload fields are redacted (`startTime=nil`, `duration=nil`).
+- Added combat fallback for Discipline `Atonement` count using combat-log aura tracking when live aura reads under-report in combat.
+
+### Changed
+- Added additional throttled diagnostics for PW:S missing-payload fallback decisions and Atonement live-vs-cached count summaries.
+
 ## [1.0.13-beta.5] - 2026-03-12
 
 ### Fixed

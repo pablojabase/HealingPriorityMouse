@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.5"
+local ADDON_VERSION = "1.0.13-beta.6"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -130,11 +130,16 @@ local SPELLS = {
 
 local resolvedSpells = {}
 local cooldownCache = {}
+local atonementAuraCache = {}
 local pwsDebugGate = {
     lastByKey = {},
     minInterval = 1.5,
 }
 local pwsEntryDebugState = {
+    lastSig = nil,
+    lastAt = 0,
+}
+local atonementDebugState = {
     lastSig = nil,
     lastAt = 0,
 }
@@ -176,6 +181,28 @@ local function logPwsEntryDecision(ready, inCombat, atonementCount)
     logPwsDecision("entry", "entry decision: ready=" .. tostring(ready)
         .. ", inCombat=" .. tostring(inCombat)
         .. ", atonementCount=" .. tostring(atonementCount))
+end
+
+local function logAtonementSummary(atonementCount, liveCount, cachedCount, unitCount, playerHasAtonement, inCombat)
+    if not HealingPriorityMouseDB.debugLogEnabled then
+        return
+    end
+
+    local now = GetTime()
+    local sig = tostring(atonementCount) .. "|" .. tostring(liveCount) .. "|" .. tostring(cachedCount)
+        .. "|" .. tostring(unitCount) .. "|" .. tostring(playerHasAtonement) .. "|" .. tostring(inCombat)
+    if atonementDebugState.lastSig == sig and (now - (atonementDebugState.lastAt or 0)) < 2.0 then
+        return
+    end
+
+    atonementDebugState.lastSig = sig
+    atonementDebugState.lastAt = now
+    pushDebugLog("ATONEMENT count=" .. tostring(atonementCount)
+        .. ", liveCount=" .. tostring(liveCount)
+        .. ", cachedCount=" .. tostring(cachedCount)
+        .. ", unitCount=" .. tostring(unitCount)
+        .. ", playerHasAtonement=" .. tostring(playerHasAtonement)
+        .. ", inCombat=" .. tostring(inCombat))
 end
 
 resolveSpellID = function(key)
@@ -463,6 +490,13 @@ local function isMissingCooldownPayload(startTime, duration)
     return startTime == nil and duration == nil
 end
 
+local function getOptimisticMissingPayloadReady(spellID)
+    if isPowerWordShieldSpell(spellID) and isSpellKnownSafe(spellID) then
+        return true
+    end
+    return nil
+end
+
 local function updateCooldownCache(spellID)
     if not spellID then
         return
@@ -491,11 +525,27 @@ local function updateCooldownCache(spellID)
     end
 
     if missingPayload then
+        local previousCached = cooldownCache[spellID]
         local legacyReady = getLegacyCooldownReady(spellID)
+        local usableFallback = isSpellUsableSafe(spellID)
+        local optimisticReady = getOptimisticMissingPayloadReady(spellID)
         if legacyReady ~= nil then
             ready = legacyReady
+        elseif previousCached and previousCached.ready ~= nil then
+            ready = previousCached.ready and true or false
+        elseif optimisticReady ~= nil then
+            ready = optimisticReady
         else
-            ready = isSpellUsableSafe(spellID)
+            ready = usableFallback
+        end
+
+        if isPowerWordShieldSpell(spellID) then
+            logPwsDecision("cache-missing-details", "missing payload fallback: legacy=" .. tostring(legacyReady)
+                .. ", usable=" .. tostring(usableFallback)
+                .. ", prevCached=" .. tostring(previousCached and previousCached.ready)
+                .. ", optimistic=" .. tostring(optimisticReady)
+                .. ", known=" .. tostring(isSpellKnownSafe(spellID))
+                .. ", inCombat=" .. tostring(UnitAffectingCombat("player")))
         end
     end
 
@@ -619,6 +669,15 @@ local function getCooldownReady(spellID, options)
                 return legacyReady
             end
 
+            local optimisticReady = getOptimisticMissingPayloadReady(spellID)
+            if optimisticReady ~= nil then
+                if isPws then
+                    logPwsDecision("missing-optimistic", "missing payload -> optimistic=" .. tostring(optimisticReady)
+                        .. ", isOnGCD=" .. tostring(isOnGCD))
+                end
+                return optimisticReady
+            end
+
             local usableFallback = isSpellUsableSafe(spellID)
             if isPws then
                 logPwsDecision("missing-usable", "missing payload -> usable=" .. tostring(usableFallback)
@@ -683,12 +742,77 @@ end
 
 local function countAuraInGroup(spellID, fromPlayerOnly)
     local n = 0
+    local unitCount = 0
     for _, unit in ipairs(getGroupUnits()) do
-        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) and isAuraActive(unit, spellID, true, fromPlayerOnly) then
-            n = n + 1
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            unitCount = unitCount + 1
+            if isAuraActive(unit, spellID, true, fromPlayerOnly) then
+                n = n + 1
+            end
+        end
+    end
+    return n, unitCount
+end
+
+local function clearAtonementAuraCache()
+    atonementAuraCache = {}
+end
+
+local function getCachedAtonementCountInGroup()
+    local n = 0
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            local guid = UnitGUID(unit)
+            if guid and atonementAuraCache[guid] then
+                n = n + 1
+            end
         end
     end
     return n
+end
+
+local function updateAtonementCacheFromCombatLog()
+    local atonementID = resolveSpellID("Atonement")
+    if not atonementID then
+        return false
+    end
+
+    local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID = CombatLogGetCurrentEventInfo()
+    if not subEvent then
+        return false
+    end
+
+    if subEvent == "UNIT_DIED" or subEvent == "UNIT_DESTROYED" then
+        if destGUID and atonementAuraCache[destGUID] then
+            atonementAuraCache[destGUID] = nil
+            return true
+        end
+        return false
+    end
+
+    if spellID ~= atonementID then
+        return false
+    end
+
+    if subEvent == "SPELL_AURA_APPLIED" or subEvent == "SPELL_AURA_REFRESH" then
+        if sourceGUID == UnitGUID("player") and destGUID then
+            if not atonementAuraCache[destGUID] then
+                atonementAuraCache[destGUID] = true
+                return true
+            end
+        end
+        return false
+    end
+
+    if subEvent == "SPELL_AURA_REMOVED" or subEvent == "SPELL_AURA_BROKEN" or subEvent == "SPELL_AURA_BROKEN_SPELL" then
+        if destGUID and atonementAuraCache[destGUID] then
+            atonementAuraCache[destGUID] = nil
+            return true
+        end
+        return false
+    end
+
+    return false
 end
 
 local function countAliveGroupUnits()
@@ -941,7 +1065,18 @@ local function buildEntries()
         end
     elseif specID == 256 then
         local atonementID = resolveSpellID("Atonement")
-        local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
+        local atonementCount, atonementUnitCount = 0, 0
+        if atonementID then
+            atonementCount, atonementUnitCount = countAuraInGroup(atonementID, true)
+        end
+        local inCombat = UnitAffectingCombat("player") and true or false
+        local cachedAtonementCount = getCachedAtonementCountInGroup()
+        local liveAtonementCount = atonementCount
+        if inCombat and cachedAtonementCount > atonementCount then
+            atonementCount = cachedAtonementCount
+        end
+        local playerHasAtonement = atonementID and isAuraActive("player", atonementID, true, true) or false
+        logAtonementSummary(atonementCount, liveAtonementCount, cachedAtonementCount, atonementUnitCount, playerHasAtonement, inCombat)
         if atonementID then
             addEntry("Atonement", atonementID, tostring(atonementCount))
         end
@@ -1334,6 +1469,8 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
@@ -1341,10 +1478,22 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             return
         end
         copyDefaults(HealingPriorityMouseDB, defaults)
+        clearAtonementAuraCache()
         refreshTrackedCooldownCaches()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
+    end
+
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        if updateAtonementCacheFromCombatLog() then
+            refresh()
+        end
+        return
+    end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        clearAtonementAuraCache()
     end
 
     if event == "SPELL_UPDATE_COOLDOWN"
@@ -1353,6 +1502,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         or event == "PLAYER_ENTERING_WORLD"
         or event == "TRAIT_CONFIG_UPDATED" then
         refreshTrackedCooldownCaches()
+    end
+
+    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+        clearAtonementAuraCache()
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
