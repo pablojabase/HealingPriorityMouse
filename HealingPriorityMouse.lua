@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.4"
+local ADDON_VERSION = "1.0.13-beta.5"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -131,7 +131,11 @@ local SPELLS = {
 local resolvedSpells = {}
 local cooldownCache = {}
 local pwsDebugGate = {
-    lastKey = nil,
+    lastByKey = {},
+    minInterval = 1.5,
+}
+local pwsEntryDebugState = {
+    lastSig = nil,
     lastAt = 0,
 }
 local resolveSpellID
@@ -147,12 +151,31 @@ local function logPwsDecision(key, text)
     end
     local now = GetTime()
     local dedupeKey = tostring(key or "") .. ":" .. tostring(text or "")
-    if pwsDebugGate.lastKey == dedupeKey and (now - (pwsDebugGate.lastAt or 0)) < 0.25 then
+    local lastAt = pwsDebugGate.lastByKey[dedupeKey]
+    local minInterval = pwsDebugGate.minInterval or 1.5
+    if lastAt and (now - lastAt) < minInterval then
         return
     end
-    pwsDebugGate.lastKey = dedupeKey
-    pwsDebugGate.lastAt = now
+    pwsDebugGate.lastByKey[dedupeKey] = now
     pushDebugLog("PWS " .. tostring(text))
+end
+
+local function logPwsEntryDecision(ready, inCombat, atonementCount)
+    if not HealingPriorityMouseDB.debugLogEnabled then
+        return
+    end
+
+    local now = GetTime()
+    local sig = tostring(ready) .. "|" .. tostring(inCombat) .. "|" .. tostring(atonementCount)
+    if pwsEntryDebugState.lastSig == sig and (now - (pwsEntryDebugState.lastAt or 0)) < 2.0 then
+        return
+    end
+
+    pwsEntryDebugState.lastSig = sig
+    pwsEntryDebugState.lastAt = now
+    logPwsDecision("entry", "entry decision: ready=" .. tostring(ready)
+        .. ", inCombat=" .. tostring(inCombat)
+        .. ", atonementCount=" .. tostring(atonementCount))
 end
 
 resolveSpellID = function(key)
@@ -197,15 +220,30 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if fromPlayer then
         filter = filter .. "|PLAYER"
     end
+    if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
+        local okByID, auraByID = pcall(C_UnitAuras.GetAuraDataBySpellID, unit, spellID, filter)
+        if okByID and auraByID then
+            return true
+        end
+    end
     if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
         local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, spellName, filter)
         if not ok then
-            return false
+            aura = nil
         end
         local nilOk, isNil = pcall(function()
             return aura == nil
         end)
-        return nilOk and (not isNil) or false
+        if nilOk and (not isNil) then
+            return true
+        end
+    end
+
+    if AuraUtil and AuraUtil.FindAuraBySpellID then
+        local okLegacy, auraLegacy = pcall(AuraUtil.FindAuraBySpellID, spellID, unit, filter)
+        if okLegacy and auraLegacy then
+            return true
+        end
     end
     return false
 end
@@ -914,9 +952,7 @@ local function buildEntries()
             addEntry("Power Word: Shield", pwsID)
         end
         if pwsID then
-            logPwsDecision("entry", "entry decision: ready=" .. tostring(pwsReady)
-                .. ", inCombat=" .. tostring(UnitAffectingCombat("player"))
-                .. ", atonementCount=" .. tostring(atonementCount))
+            logPwsEntryDecision(pwsReady, UnitAffectingCombat("player"), atonementCount)
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")

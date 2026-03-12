@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.5] - 2026-03-12
+
+### Fixed
+- Improved Discipline `Atonement` combat counting reliability by adding robust aura-detection fallbacks.
+- Reduced cases where icon decisions flicker or disappear in combat due to fragile aura API reads.
+
+### Changed
+- Reduced PW:S debug log spam with stronger per-message throttling and entry-state-change logging.
+
 ## [1.0.13-beta.4] - 2026-03-12
 
 ### Fixed
