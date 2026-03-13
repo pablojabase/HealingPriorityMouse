@@ -2,69 +2,6 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.13-beta.7] - 2026-03-12
-
-### Fixed
-- Fixed login-time `ADDON_ACTION_FORBIDDEN` involving protected `Frame:RegisterEvent()` calls.
-
-### Changed
-- Runtime event registration now initializes during addon startup (`ADDON_LOADED`) instead of in the main chunk.
-
-## [1.0.13-beta.6] - 2026-03-12
-
-### Fixed
-- Prevented Discipline `Power Word: Shield` readiness from dropping to false during combat when cooldown payload fields are redacted (`startTime=nil`, `duration=nil`).
-- Added combat fallback for Discipline `Atonement` count using combat-log aura tracking when live aura reads under-report in combat.
-
-### Changed
-- Added additional throttled diagnostics for PW:S missing-payload fallback decisions and Atonement live-vs-cached count summaries.
-
-## [1.0.13-beta.5] - 2026-03-12
-
-### Fixed
-- Improved Discipline `Atonement` combat counting reliability by adding robust aura-detection fallbacks.
-- Reduced cases where icon decisions flicker or disappear in combat due to fragile aura API reads.
-
-### Changed
-- Reduced PW:S debug log spam with stronger per-message throttling and entry-state-change logging.
-
-## [1.0.13-beta.4] - 2026-03-12
-
-### Fixed
-- Fixed Discipline `Power Word: Shield` readiness false negatives when in-combat cooldown payloads return missing (`startTime=nil`, `duration=nil`) values.
-
-### Changed
-- Added resilient cooldown fallback order for missing payloads: cache -> legacy `GetSpellCooldown` -> `IsUsableSpell`.
-- Added `missingPayload` flag to PW:S debug logs for clearer combat diagnostics.
-
-## [1.0.13-beta.3] - 2026-03-12
-
-### Fixed
-- Fixed startup/runtime crash caused by calling `resolveSpellID` before local declaration in PW:S debug instrumentation.
-
-### Notes
-- Hotfix beta release to restore addon loading and allow PW:S debug capture.
-
-## [1.0.13-beta.2] - 2026-03-12
-
-### Added
-- Added `/hpm debug on|off|dump [n]|clear` internal logging tools for combat troubleshooting.
-- Added PW:S-focused decision tracing (live cooldown read, cache fallback, usability fallback, and entry decision logging).
-
-### Notes
-- This beta is intended to capture high-signal diagnostics for in-combat Power Word: Shield icon suppression.
-
-## [1.0.13-beta.1] - 2026-03-12
-
-### Changed
-- Added event-driven internal cooldown caching for Discipline `Power Word: Shield` to improve icon readiness stability during combat.
-
-### Fixed
-- Reduced cases where `Power Word: Shield` icon incorrectly disappears in combat despite the spell being available.
-
-### Notes
-- This is a beta pipeline validation release focused on combat cooldown-read consistency.
-
 ## [1.0.12] - 2026-03-11
 
 ### Added

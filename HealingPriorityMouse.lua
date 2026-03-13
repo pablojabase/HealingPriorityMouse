@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.7"
+local ADDON_VERSION = "1.0.12"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -11,9 +11,6 @@ local defaults = {
     spellNamePosition = "bottom", -- bottom | top
     undergrowthMode = "auto", -- auto | on | off
     showCharges = true,
-    debugLogEnabled = false,
-    debugLogMax = 300,
-    debugLog = {},
 }
 
 local function copyDefaults(dst, src)
@@ -31,53 +28,6 @@ end
 
 local function msg(text)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ccffHealingPriorityMouse|r: " .. tostring(text))
-end
-
-local function pushDebugLog(line)
-    if not HealingPriorityMouseDB.debugLogEnabled then
-        return
-    end
-    if type(HealingPriorityMouseDB.debugLog) ~= "table" then
-        HealingPriorityMouseDB.debugLog = {}
-    end
-
-    local ts = date("%H:%M:%S")
-    local record = "[" .. ts .. "] " .. tostring(line)
-    table.insert(HealingPriorityMouseDB.debugLog, record)
-
-    local maxEntries = tonumber(HealingPriorityMouseDB.debugLogMax) or 300
-    if maxEntries < 50 then
-        maxEntries = 50
-    end
-    while #HealingPriorityMouseDB.debugLog > maxEntries do
-        table.remove(HealingPriorityMouseDB.debugLog, 1)
-    end
-end
-
-local function clearDebugLog()
-    HealingPriorityMouseDB.debugLog = {}
-end
-
-local function dumpDebugLog(limit)
-    local logs = HealingPriorityMouseDB.debugLog
-    if type(logs) ~= "table" or #logs == 0 then
-        msg("debug log is empty")
-        return
-    end
-
-    local n = tonumber(limit) or 40
-    if n < 1 then
-        n = 1
-    end
-    if n > 200 then
-        n = 200
-    end
-
-    local startIndex = math.max(1, #logs - n + 1)
-    msg("debug log dump (" .. tostring(#logs - startIndex + 1) .. "/" .. tostring(#logs) .. "):")
-    for i = startIndex, #logs do
-        msg(logs[i])
-    end
 end
 
 local function getSpellName(spellID)
@@ -129,83 +79,8 @@ local SPELLS = {
 }
 
 local resolvedSpells = {}
-local cooldownCache = {}
-local atonementAuraCache = {}
-local pwsDebugGate = {
-    lastByKey = {},
-    minInterval = 1.5,
-}
-local pwsEntryDebugState = {
-    lastSig = nil,
-    lastAt = 0,
-}
-local atonementDebugState = {
-    lastSig = nil,
-    lastAt = 0,
-}
-local resolveSpellID
 
-local function isPowerWordShieldSpell(spellID)
-    local pwsID = resolveSpellID("PowerWordShield")
-    return pwsID and spellID == pwsID
-end
-
-local function logPwsDecision(key, text)
-    if not HealingPriorityMouseDB.debugLogEnabled then
-        return
-    end
-    local now = GetTime()
-    local dedupeKey = tostring(key or "") .. ":" .. tostring(text or "")
-    local lastAt = pwsDebugGate.lastByKey[dedupeKey]
-    local minInterval = pwsDebugGate.minInterval or 1.5
-    if lastAt and (now - lastAt) < minInterval then
-        return
-    end
-    pwsDebugGate.lastByKey[dedupeKey] = now
-    pushDebugLog("PWS " .. tostring(text))
-end
-
-local function logPwsEntryDecision(ready, inCombat, atonementCount)
-    if not HealingPriorityMouseDB.debugLogEnabled then
-        return
-    end
-
-    local now = GetTime()
-    local sig = tostring(ready) .. "|" .. tostring(inCombat) .. "|" .. tostring(atonementCount)
-    if pwsEntryDebugState.lastSig == sig and (now - (pwsEntryDebugState.lastAt or 0)) < 2.0 then
-        return
-    end
-
-    pwsEntryDebugState.lastSig = sig
-    pwsEntryDebugState.lastAt = now
-    logPwsDecision("entry", "entry decision: ready=" .. tostring(ready)
-        .. ", inCombat=" .. tostring(inCombat)
-        .. ", atonementCount=" .. tostring(atonementCount))
-end
-
-local function logAtonementSummary(atonementCount, liveCount, cachedCount, unitCount, playerHasAtonement, inCombat)
-    if not HealingPriorityMouseDB.debugLogEnabled then
-        return
-    end
-
-    local now = GetTime()
-    local sig = tostring(atonementCount) .. "|" .. tostring(liveCount) .. "|" .. tostring(cachedCount)
-        .. "|" .. tostring(unitCount) .. "|" .. tostring(playerHasAtonement) .. "|" .. tostring(inCombat)
-    if atonementDebugState.lastSig == sig and (now - (atonementDebugState.lastAt or 0)) < 2.0 then
-        return
-    end
-
-    atonementDebugState.lastSig = sig
-    atonementDebugState.lastAt = now
-    pushDebugLog("ATONEMENT count=" .. tostring(atonementCount)
-        .. ", liveCount=" .. tostring(liveCount)
-        .. ", cachedCount=" .. tostring(cachedCount)
-        .. ", unitCount=" .. tostring(unitCount)
-        .. ", playerHasAtonement=" .. tostring(playerHasAtonement)
-        .. ", inCombat=" .. tostring(inCombat))
-end
-
-resolveSpellID = function(key)
+local function resolveSpellID(key)
     if resolvedSpells[key] ~= nil then
         return resolvedSpells[key]
     end
@@ -247,30 +122,15 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if fromPlayer then
         filter = filter .. "|PLAYER"
     end
-    if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
-        local okByID, auraByID = pcall(C_UnitAuras.GetAuraDataBySpellID, unit, spellID, filter)
-        if okByID and auraByID then
-            return true
-        end
-    end
     if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
         local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, spellName, filter)
         if not ok then
-            aura = nil
+            return false
         end
         local nilOk, isNil = pcall(function()
             return aura == nil
         end)
-        if nilOk and (not isNil) then
-            return true
-        end
-    end
-
-    if AuraUtil and AuraUtil.FindAuraBySpellID then
-        local okLegacy, auraLegacy = pcall(AuraUtil.FindAuraBySpellID, spellID, unit, filter)
-        if okLegacy and auraLegacy then
-            return true
-        end
+        return nilOk and (not isNil) or false
     end
     return false
 end
@@ -456,271 +316,30 @@ local function isCooldownDurationReady(duration, isOnGCD)
     return false
 end
 
-local function getLegacyCooldownReady(spellID)
-    if not GetSpellCooldown then
-        return nil
-    end
-
-    local ok, startTime, duration, enabled = pcall(GetSpellCooldown, spellID)
-    if not ok then
-        return nil
-    end
-
-    if enabled == 0 then
-        return false
-    end
-
-    local safeStart = plainNumber(startTime)
-    local safeDuration = plainNumber(duration)
-    if safeDuration and numberLE(safeDuration, 0) then
-        return true
-    end
-    if safeStart and safeDuration and numberLE(safeStart + safeDuration, GetTime()) then
-        return true
-    end
-
-    if safeDuration ~= nil then
-        return false
-    end
-
-    return nil
-end
-
-local function isMissingCooldownPayload(startTime, duration)
-    return startTime == nil and duration == nil
-end
-
-local function getOptimisticMissingPayloadReady(spellID)
-    if isPowerWordShieldSpell(spellID) and isSpellKnownSafe(spellID) then
-        return true
-    end
-    return nil
-end
-
-local function updateCooldownCache(spellID)
-    if not spellID then
-        return
-    end
-    if not (C_Spell and C_Spell.GetSpellCooldown) then
-        return
-    end
-
-    local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-    if not ok or not info then
-        return
-    end
-
-    local duration = plainNumber(info.duration)
-    local startTime = plainNumber(info.startTime)
-    local isOnGCD = isTrueFlag(info.isOnGCD, false)
-    local ready = isCooldownDurationReady(duration, isOnGCD)
-    local endTime = nil
-    local missingPayload = isMissingCooldownPayload(startTime, duration)
-
-    if startTime and duration then
-        endTime = startTime + duration
-        if numberLE(endTime, GetTime()) then
-            ready = true
-        end
-    end
-
-    if missingPayload then
-        local previousCached = cooldownCache[spellID]
-        local legacyReady = getLegacyCooldownReady(spellID)
-        local usableFallback = isSpellUsableSafe(spellID)
-        local optimisticReady = getOptimisticMissingPayloadReady(spellID)
-        if legacyReady ~= nil then
-            ready = legacyReady
-        elseif previousCached and previousCached.ready ~= nil then
-            ready = previousCached.ready and true or false
-        elseif optimisticReady ~= nil then
-            ready = optimisticReady
-        else
-            ready = usableFallback
-        end
-
-        if isPowerWordShieldSpell(spellID) then
-            logPwsDecision("cache-missing-details", "missing payload fallback: legacy=" .. tostring(legacyReady)
-                .. ", usable=" .. tostring(usableFallback)
-                .. ", prevCached=" .. tostring(previousCached and previousCached.ready)
-                .. ", optimistic=" .. tostring(optimisticReady)
-                .. ", known=" .. tostring(isSpellKnownSafe(spellID))
-                .. ", inCombat=" .. tostring(UnitAffectingCombat("player")))
-        end
-    end
-
-    cooldownCache[spellID] = {
-        ready = ready,
-        endTime = endTime,
-        updatedAt = GetTime(),
-    }
-
-    if isPowerWordShieldSpell(spellID) then
-        logPwsDecision("cache-update", "cache update: ready=" .. tostring(ready)
-            .. ", start=" .. tostring(startTime)
-            .. ", duration=" .. tostring(duration)
-            .. ", isOnGCD=" .. tostring(isOnGCD)
-            .. ", missingPayload=" .. tostring(missingPayload)
-            .. ", inCombat=" .. tostring(UnitAffectingCombat("player")))
-    end
-end
-
-local function getCachedCooldownReady(spellID)
-    local cached = cooldownCache[spellID]
-    if not cached then
-        return nil
-    end
-
-    if cached.endTime and numberLE(cached.endTime, GetTime()) then
-        return true
-    end
-
-    return cached.ready and true or false
-end
-
-local function refreshTrackedCooldownCaches()
-    local pwsID = resolveSpellID("PowerWordShield")
-    if pwsID then
-        updateCooldownCache(pwsID)
-    end
-end
-
-local function getCooldownReady(spellID, options)
-    options = options or {}
-    local allowCacheFallback = options.allowCacheFallback and true or false
-
-    local isPws = isPowerWordShieldSpell(spellID)
-
+local function getCooldownReady(spellID)
     if not isSpellKnownSafe(spellID) then
-        if isPws then
-            logPwsDecision("known", "blocked: spell not known")
-        end
         return false
     end
 
     if C_Spell and C_Spell.GetSpellCooldown then
         local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
         if not ok or not info then
-            if allowCacheFallback then
-                local cached = getCachedCooldownReady(spellID)
-                if cached ~= nil then
-                    if isPws then
-                        logPwsDecision("api-fail-cache", "api read failed -> cache=" .. tostring(cached))
-                    end
-                    return cached
-                end
-            end
-            local usableFallback = isSpellUsableSafe(spellID)
-            if isPws then
-                logPwsDecision("api-fail-usable", "api read failed -> usable=" .. tostring(usableFallback))
-            end
-            return usableFallback
+            return isSpellUsableSafe(spellID)
         end
         -- Midnight can return secret booleans; avoid direct truth tests on API fields.
         if isFalseFlag(info.isEnabled, false) then
-            if allowCacheFallback then
-                local cached = getCachedCooldownReady(spellID)
-                if cached ~= nil then
-                    if isPws then
-                        logPwsDecision("disabled-cache", "isEnabled=false -> cache=" .. tostring(cached))
-                    end
-                    return cached
-                end
-            end
-            local usableFallback = isSpellUsableSafe(spellID)
-            if isPws then
-                logPwsDecision("disabled-usable", "isEnabled=false -> usable=" .. tostring(usableFallback))
-            end
-            return usableFallback
+            return isSpellUsableSafe(spellID)
         end
         local duration = plainNumber(info.duration)
-        local startTime = plainNumber(info.startTime)
-        local isOnGCD = isTrueFlag(info.isOnGCD, false)
-        local missingPayload = isMissingCooldownPayload(startTime, duration)
-        if isCooldownDurationReady(duration, isOnGCD) then
-            if allowCacheFallback then
-                updateCooldownCache(spellID)
-            end
-            if isPws then
-                logPwsDecision("live-ready", "live ready: duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
-            end
+        if duration and numberLE(duration, 0) then
             return true
         end
-
-        if missingPayload then
-            if allowCacheFallback then
-                updateCooldownCache(spellID)
-                local cached = getCachedCooldownReady(spellID)
-                if cached ~= nil then
-                    if isPws then
-                        logPwsDecision("missing-cache", "missing payload -> cache=" .. tostring(cached)
-                            .. ", isOnGCD=" .. tostring(isOnGCD))
-                    end
-                    return cached
-                end
-            end
-
-            local legacyReady = getLegacyCooldownReady(spellID)
-            if legacyReady ~= nil then
-                if isPws then
-                    logPwsDecision("missing-legacy", "missing payload -> legacy=" .. tostring(legacyReady)
-                        .. ", isOnGCD=" .. tostring(isOnGCD))
-                end
-                return legacyReady
-            end
-
-            local optimisticReady = getOptimisticMissingPayloadReady(spellID)
-            if optimisticReady ~= nil then
-                if isPws then
-                    logPwsDecision("missing-optimistic", "missing payload -> optimistic=" .. tostring(optimisticReady)
-                        .. ", isOnGCD=" .. tostring(isOnGCD))
-                end
-                return optimisticReady
-            end
-
-            local usableFallback = isSpellUsableSafe(spellID)
-            if isPws then
-                logPwsDecision("missing-usable", "missing payload -> usable=" .. tostring(usableFallback)
-                    .. ", isOnGCD=" .. tostring(isOnGCD))
-            end
-            return usableFallback
+        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+            return true
         end
-
-        if allowCacheFallback then
-            updateCooldownCache(spellID)
-            local cached = getCachedCooldownReady(spellID)
-            if cached ~= nil then
-                if isPws then
-                    logPwsDecision("not-ready-cache", "live not ready -> cache=" .. tostring(cached)
-                        .. ", duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
-                end
-                return cached
-            end
-        end
-
-        local usableFallback = isSpellUsableSafe(spellID)
-        if isPws then
-            logPwsDecision("not-ready-usable", "live not ready -> usable=" .. tostring(usableFallback)
-                .. ", duration=" .. tostring(duration) .. ", isOnGCD=" .. tostring(isOnGCD))
-        end
-        return usableFallback
+        return isSpellUsableSafe(spellID)
     end
-
-    if allowCacheFallback then
-        local cached = getCachedCooldownReady(spellID)
-        if cached ~= nil then
-            if isPws then
-                logPwsDecision("no-cspell-cache", "no C_Spell -> cache=" .. tostring(cached))
-            end
-            return cached
-        end
-    end
-
-    local usableFallback = isSpellUsableSafe(spellID)
-    if isPws then
-        logPwsDecision("no-cspell-usable", "no C_Spell -> usable=" .. tostring(usableFallback))
-    end
-    return usableFallback
+    return isSpellUsableSafe(spellID)
 end
 
 local function getGroupUnits()
@@ -742,77 +361,12 @@ end
 
 local function countAuraInGroup(spellID, fromPlayerOnly)
     local n = 0
-    local unitCount = 0
     for _, unit in ipairs(getGroupUnits()) do
-        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
-            unitCount = unitCount + 1
-            if isAuraActive(unit, spellID, true, fromPlayerOnly) then
-                n = n + 1
-            end
-        end
-    end
-    return n, unitCount
-end
-
-local function clearAtonementAuraCache()
-    atonementAuraCache = {}
-end
-
-local function getCachedAtonementCountInGroup()
-    local n = 0
-    for _, unit in ipairs(getGroupUnits()) do
-        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
-            local guid = UnitGUID(unit)
-            if guid and atonementAuraCache[guid] then
-                n = n + 1
-            end
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) and isAuraActive(unit, spellID, true, fromPlayerOnly) then
+            n = n + 1
         end
     end
     return n
-end
-
-local function updateAtonementCacheFromCombatLog()
-    local atonementID = resolveSpellID("Atonement")
-    if not atonementID then
-        return false
-    end
-
-    local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID = CombatLogGetCurrentEventInfo()
-    if not subEvent then
-        return false
-    end
-
-    if subEvent == "UNIT_DIED" or subEvent == "UNIT_DESTROYED" then
-        if destGUID and atonementAuraCache[destGUID] then
-            atonementAuraCache[destGUID] = nil
-            return true
-        end
-        return false
-    end
-
-    if spellID ~= atonementID then
-        return false
-    end
-
-    if subEvent == "SPELL_AURA_APPLIED" or subEvent == "SPELL_AURA_REFRESH" then
-        if sourceGUID == UnitGUID("player") and destGUID then
-            if not atonementAuraCache[destGUID] then
-                atonementAuraCache[destGUID] = true
-                return true
-            end
-        end
-        return false
-    end
-
-    if subEvent == "SPELL_AURA_REMOVED" or subEvent == "SPELL_AURA_BROKEN" or subEvent == "SPELL_AURA_BROKEN_SPELL" then
-        if destGUID and atonementAuraCache[destGUID] then
-            atonementAuraCache[destGUID] = nil
-            return true
-        end
-        return false
-    end
-
-    return false
 end
 
 local function countAliveGroupUnits()
@@ -1065,29 +619,14 @@ local function buildEntries()
         end
     elseif specID == 256 then
         local atonementID = resolveSpellID("Atonement")
-        local atonementCount, atonementUnitCount = 0, 0
-        if atonementID then
-            atonementCount, atonementUnitCount = countAuraInGroup(atonementID, true)
-        end
-        local inCombat = UnitAffectingCombat("player") and true or false
-        local cachedAtonementCount = getCachedAtonementCountInGroup()
-        local liveAtonementCount = atonementCount
-        if inCombat and cachedAtonementCount > atonementCount then
-            atonementCount = cachedAtonementCount
-        end
-        local playerHasAtonement = atonementID and isAuraActive("player", atonementID, true, true) or false
-        logAtonementSummary(atonementCount, liveAtonementCount, cachedAtonementCount, atonementUnitCount, playerHasAtonement, inCombat)
+        local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
         if atonementID then
             addEntry("Atonement", atonementID, tostring(atonementCount))
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
-        local pwsReady = pwsID and getCooldownReady(pwsID, { allowCacheFallback = true })
-        if pwsID and pwsReady then
+        if pwsID and getCooldownReady(pwsID) then
             addEntry("Power Word: Shield", pwsID)
-        end
-        if pwsID then
-            logPwsEntryDecision(pwsReady, UnitAffectingCombat("player"), atonementCount)
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
@@ -1460,61 +999,24 @@ end
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
-local runtimeEventsRegistered = false
-
-local function registerRuntimeEvents()
-    if runtimeEventsRegistered then
-        return
-    end
-    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    eventFrame:RegisterEvent("SPELLS_CHANGED")
-    eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-    eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
-    eventFrame:RegisterEvent("UNIT_AURA")
-    eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
-    eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
-    eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    runtimeEventsRegistered = true
-end
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterEvent("SPELLS_CHANGED")
+eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
+eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then
             return
         end
-        registerRuntimeEvents()
         copyDefaults(HealingPriorityMouseDB, defaults)
-        clearAtonementAuraCache()
-        refreshTrackedCooldownCaches()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
-    end
-
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        if updateAtonementCacheFromCombatLog() then
-            refresh()
-        end
-        return
-    end
-
-    if event == "PLAYER_REGEN_ENABLED" then
-        clearAtonementAuraCache()
-    end
-
-    if event == "SPELL_UPDATE_COOLDOWN"
-        or event == "SPELLS_CHANGED"
-        or event == "PLAYER_SPECIALIZATION_CHANGED"
-        or event == "PLAYER_ENTERING_WORLD"
-        or event == "TRAIT_CONFIG_UPDATED" then
-        refreshTrackedCooldownCaches()
-    end
-
-    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
-        clearAtonementAuraCache()
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
@@ -1680,37 +1182,6 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
                 msg(key .. " -> missing on this client")
             end
         end
-        return
-    end
-
-    if cmd == "debug" then
-        if rest == "on" then
-            HealingPriorityMouseDB.debugLogEnabled = true
-            msg("debug log enabled")
-            pushDebugLog("debug enabled")
-            return
-        end
-        if rest == "off" then
-            pushDebugLog("debug disabled")
-            HealingPriorityMouseDB.debugLogEnabled = false
-            msg("debug log disabled")
-            return
-        end
-        if rest == "clear" then
-            clearDebugLog()
-            msg("debug log cleared")
-            return
-        end
-        local dumpCount = rest:match("^dump%s*(%d*)$")
-        if dumpCount ~= nil then
-            if dumpCount == "" then
-                dumpDebugLog(40)
-            else
-                dumpDebugLog(tonumber(dumpCount))
-            end
-            return
-        end
-        msg("usage: /hpm debug on|off|dump [n]|clear")
         return
     end
 

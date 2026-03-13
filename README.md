@@ -23,4 +23,3 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm namepos top|bottom`: set spell name position
 - `/hpm charges on|off`: toggle charge count overlay on icons
 - `/hpm audit`: verify which tracked spell IDs resolve on your current client build
-- `/hpm debug on|off|dump [n]|clear`: enable and inspect internal debug logging (useful for PW:S combat troubleshooting)
