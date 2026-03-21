@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.12"
+local ADDON_VERSION = "1.0.13-beta.1"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -11,6 +11,8 @@ local defaults = {
     spellNamePosition = "bottom", -- bottom | top
     undergrowthMode = "auto", -- auto | on | off
     showCharges = true,
+    showGlows = true,
+    glowDebug = false,
 }
 
 local function copyDefaults(dst, src)
@@ -79,6 +81,19 @@ local SPELLS = {
 }
 
 local resolvedSpells = {}
+
+local GLOW_RULES = {
+    RenewingMist = {
+        mode = "chargesAtMax",
+    },
+    Lightweaver = {
+        mode = "stackAtLeast",
+        threshold = 2,
+        stackSource = "entry",
+    },
+}
+
+local glowDebugState = {}
 
 local function resolveSpellID(key)
     if resolvedSpells[key] ~= nil then
@@ -204,6 +219,13 @@ local function numberGT(value, limit)
     return ok and result or false
 end
 
+local function numberGE(value, limit)
+    local ok, result = pcall(function()
+        return value >= limit
+    end)
+    return ok and result or false
+end
+
 local function isTrueFlag(value, default)
     local ok, result = pcall(function()
         return value == true
@@ -262,6 +284,122 @@ local function getSafeCharges(spellID)
     end
 
     return nil
+end
+
+local function getAuraStackCountSafe(unit, spellID, helpful, fromPlayer)
+    if not unit or not UnitExists(unit) then
+        return nil
+    end
+
+    local spellName = getSpellName(spellID)
+    if not spellName then
+        return nil
+    end
+
+    local filter = helpful and "HELPFUL" or "HARMFUL"
+    if fromPlayer then
+        filter = filter .. "|PLAYER"
+    end
+
+    if not (C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName) then
+        return nil
+    end
+
+    local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, spellName, filter)
+    if not ok then
+        return nil
+    end
+
+    local nilOk, isNil = pcall(function()
+        return aura == nil
+    end)
+    if nilOk and isNil then
+        return 0
+    end
+
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    local applications = plainNumber(aura.applications)
+    if applications then
+        return applications
+    end
+
+    if not isNilValue(aura.applications) then
+        return nil
+    end
+
+    return 1
+end
+
+local function logGlowDecision(entry, shouldGlow, reason)
+    if not (HealingPriorityMouseDB and HealingPriorityMouseDB.glowDebug) then
+        return
+    end
+
+    local key = tostring(entry and entry.name or "?") .. ":" .. tostring(entry and entry.spellID or "?")
+    local signature = tostring(shouldGlow and true or false) .. "|" .. tostring(reason or "")
+    if glowDebugState[key] == signature then
+        return
+    end
+    glowDebugState[key] = signature
+    msg("glow " .. key .. " => " .. (shouldGlow and "on" or "off") .. " (" .. tostring(reason or "n/a") .. ")")
+end
+
+local function shouldGlowEntry(entry)
+    if not (HealingPriorityMouseDB and HealingPriorityMouseDB.showGlows) then
+        return false
+    end
+
+    if not entry or not entry.glowRule then
+        return false
+    end
+
+    local rule = GLOW_RULES[entry.glowRule]
+    if not rule then
+        return false
+    end
+
+    if rule.mode == "chargesAtMax" then
+        local charges = getSafeCharges(entry.spellID)
+        if not charges then
+            logGlowDecision(entry, false, "charges-missing")
+            return false
+        end
+        if charges.unknown then
+            logGlowDecision(entry, false, "charges-unknown")
+            return false
+        end
+        if not (charges.current and charges.max and numberGT(charges.max, 1)) then
+            logGlowDecision(entry, false, "charges-not-multi")
+            return false
+        end
+
+        local shouldGlow = numberGE(charges.current, charges.max)
+        logGlowDecision(entry, shouldGlow, shouldGlow and "charges-at-max" or "charges-below-max")
+        return shouldGlow
+    end
+
+    if rule.mode == "stackAtLeast" then
+        local stackCount
+        if rule.stackSource == "entry" then
+            stackCount = entry.glowContext and plainNumber(entry.glowContext.stackCount)
+        end
+
+        if not stackCount then
+            logGlowDecision(entry, false, "stack-missing")
+            return false
+        end
+
+        local threshold = plainNumber(rule.threshold) or 1
+        local shouldGlow = numberGE(stackCount, threshold)
+        logGlowDecision(entry, shouldGlow, shouldGlow and "stack-threshold-met" or "stack-threshold-not-met")
+        return shouldGlow
+    end
+
+    logGlowDecision(entry, false, "rule-unsupported")
+    return false
 end
 
 local function isSpellKnownSafe(spellID)
@@ -505,13 +643,64 @@ local function ensureIcon(index)
     chargeText:SetTextColor(1, 1, 1, 1)
     frame.chargeText = chargeText
 
+    local glow = frame:CreateTexture(nil, "OVERLAY")
+    glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
+    glow:SetBlendMode("ADD")
+    glow:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    glow:SetSize(56, 56)
+    glow:SetAlpha(0.95)
+    glow:Hide()
+    frame.glow = glow
+
+    local glowAnim = glow:CreateAnimationGroup()
+    local fadeIn = glowAnim:CreateAnimation("Alpha")
+    fadeIn:SetOrder(1)
+    fadeIn:SetDuration(0.45)
+    fadeIn:SetFromAlpha(0.4)
+    fadeIn:SetToAlpha(1.0)
+    local fadeOut = glowAnim:CreateAnimation("Alpha")
+    fadeOut:SetOrder(2)
+    fadeOut:SetDuration(0.45)
+    fadeOut:SetFromAlpha(1.0)
+    fadeOut:SetToAlpha(0.4)
+    glowAnim:SetLooping("REPEAT")
+    frame.glowAnim = glowAnim
+
     iconFrames[index] = frame
     return frame
 end
 
 local function hideAllIcons()
     for _, frame in ipairs(iconFrames) do
+        if frame.glowAnim and frame.glowAnim:IsPlaying() then
+            frame.glowAnim:Stop()
+        end
+        if frame.glow then
+            frame.glow:Hide()
+        end
         frame:Hide()
+    end
+end
+
+local function setIconGlow(frame, enabled)
+    if not frame then
+        return
+    end
+    if enabled then
+        if frame.glow then
+            frame.glow:Show()
+        end
+        if frame.glowAnim and not frame.glowAnim:IsPlaying() then
+            frame.glowAnim:Play()
+        end
+        return
+    end
+
+    if frame.glowAnim and frame.glowAnim:IsPlaying() then
+        frame.glowAnim:Stop()
+    end
+    if frame.glow then
+        frame.glow:Hide()
     end
 end
 
@@ -530,7 +719,7 @@ local function buildEntries()
     local mouseover = getFriendlyMouseover()
     local entries = {}
 
-    local function addEntry(name, spellID, iconCount)
+    local function addEntry(name, spellID, iconCount, glowRule, glowContext)
         if not spellID then
             return
         end
@@ -539,6 +728,8 @@ local function buildEntries()
             spellID = spellID,
             icon = getSpellTexture(spellID) or 136243,
             iconCount = iconCount,
+            glowRule = glowRule,
+            glowContext = glowContext,
         }
     end
 
@@ -571,7 +762,7 @@ local function buildEntries()
     elseif specID == 270 then
         local renewingMistID = resolveSpellID("RenewingMist")
         if renewingMistID and getCooldownReady(renewingMistID) then
-            addEntry("Renewing Mist", renewingMistID)
+            addEntry("Renewing Mist", renewingMistID, nil, "RenewingMist")
         end
         local blackOxID = resolveSpellID("StrengthOfTheBlackOx")
         if blackOxID and isAuraActive("player", blackOxID, true, true) then
@@ -639,7 +830,8 @@ local function buildEntries()
         end
         local lightweaverID = resolveSpellID("Lightweaver")
         if lightweaverID and isAuraActive("player", lightweaverID, true, true) then
-            addEntry("Lightweaver", lightweaverID)
+            local lightweaverStacks = getAuraStackCountSafe("player", lightweaverID, true, true)
+            addEntry("Lightweaver", lightweaverID, nil, "Lightweaver", { stackCount = lightweaverStacks })
         end
         local premonitionsReadyID = resolveAnySpellID({ "Premonitions" })
         if premonitionsReadyID and getCooldownReady(premonitionsReadyID) then
@@ -724,10 +916,13 @@ local function layoutEntries(entries)
             f.chargeText:Hide()
         end
 
+        setIconGlow(f, shouldGlowEntry(entries[i]))
+
         f:Show()
     end
 
     for i = #entries + 1, #iconFrames do
+        setIconGlow(iconFrames[i], false)
         iconFrames[i]:Hide()
     end
 end
@@ -1119,6 +1314,40 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
+    if cmd == "glow" then
+        if rest == "on" then
+            HealingPriorityMouseDB.showGlows = true
+            msg("showGlows = true")
+            refresh()
+            return
+        end
+        if rest == "off" then
+            HealingPriorityMouseDB.showGlows = false
+            msg("showGlows = false")
+            refresh()
+            return
+        end
+        msg("usage: /hpm glow on|off")
+        return
+    end
+
+    if cmd == "glowdebug" then
+        if rest == "on" then
+            HealingPriorityMouseDB.glowDebug = true
+            msg("glowDebug = true")
+            refresh()
+            return
+        end
+        if rest == "off" then
+            HealingPriorityMouseDB.glowDebug = false
+            msg("glowDebug = false")
+            refresh()
+            return
+        end
+        msg("usage: /hpm glowdebug on|off")
+        return
+    end
+
     if cmd == "scale" then
         local val = tonumber(rest)
         if setScaleValue(val) then
@@ -1190,6 +1419,8 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         .. ", opacity=" .. tostring(math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)) .. "%"
         .. ", undergrowthMode=" .. tostring(HealingPriorityMouseDB.undergrowthMode)
         .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges)
+        .. ", showGlows=" .. tostring(HealingPriorityMouseDB.showGlows)
+        .. ", glowDebug=" .. tostring(HealingPriorityMouseDB.glowDebug)
         .. ", showSpellNames=" .. tostring(HealingPriorityMouseDB.showSpellNames)
         .. ", spellNamePosition=" .. tostring(HealingPriorityMouseDB.spellNamePosition))
 end

@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.13-beta.1] - 2026-03-21
+
+### Added
+- Added conditional icon glow support for threshold-based readiness cues.
+- Added `Renewing Mist` glow condition when charges are fully capped (all uses available).
+- Added `Lightweaver` glow condition when player aura stacks reach threshold.
+- Added `/hpm glow on|off` to enable/disable conditional glow highlights.
+- Added `/hpm glowdebug on|off` for guarded glow decision diagnostics.
+
+### Changed
+- Glow condition evaluators use secret/protected-safe coercion and fail-safe defaults to avoid PW:S-style restricted-value regressions.
+
 ## [1.0.12] - 2026-03-11
 
 ### Added
