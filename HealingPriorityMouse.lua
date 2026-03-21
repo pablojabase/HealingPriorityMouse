@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.13-beta.1"
+local ADDON_VERSION = "1.0.14-beta.1"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -13,6 +13,8 @@ local defaults = {
     showCharges = true,
     showGlows = true,
     glowDebug = false,
+    customTrackedSpells = {},
+    customTrackedSpellsByCharacter = {},
 }
 
 local function copyDefaults(dst, src)
@@ -94,6 +96,44 @@ local GLOW_RULES = {
 }
 
 local glowDebugState = {}
+local glowStateCache = {}
+local GLOW_CACHE_TTL = 2.0
+local GROUP_AURA_REFRESH_INTERVAL = 0.12
+local lastGroupAuraRefresh = 0
+
+local function getNowTime()
+    if GetTime then
+        local ok, now = pcall(GetTime)
+        if ok and type(now) == "number" then
+            return now
+        end
+    end
+    return 0
+end
+
+local function getCachedGlowState(spellID)
+    local state = glowStateCache[spellID]
+    if not state then
+        return nil
+    end
+    local age = getNowTime() - (state.time or 0)
+    if age > GLOW_CACHE_TTL then
+        return nil
+    end
+    return state
+end
+
+local function updateCachedGlowState(spellID, patch)
+    if not spellID then
+        return
+    end
+    local state = glowStateCache[spellID] or {}
+    for key, value in pairs(patch) do
+        state[key] = value
+    end
+    state.time = getNowTime()
+    glowStateCache[spellID] = state
+end
 
 local function resolveSpellID(key)
     if resolvedSpells[key] ~= nil then
@@ -286,6 +326,189 @@ local function getSafeCharges(spellID)
     return nil
 end
 
+local function sanitizeCustomTrackedSpellsInDB()
+    local db = HealingPriorityMouseDB
+
+    local playerName, realmName = UnitFullName("player")
+    playerName = playerName or UnitName("player") or "Unknown"
+    realmName = realmName or GetRealmName() or "Unknown"
+    local characterKey = tostring(playerName) .. "-" .. tostring(realmName)
+
+    if type(db.customTrackedSpellsByCharacter) ~= "table" then
+        db.customTrackedSpellsByCharacter = {}
+    end
+
+    local activeList = db.customTrackedSpellsByCharacter[characterKey]
+    if type(activeList) ~= "table" then
+        activeList = {}
+        db.customTrackedSpellsByCharacter[characterKey] = activeList
+    end
+
+    local migrationList = db.customTrackedSpells
+    if type(migrationList) == "table" and #migrationList > 0 and #activeList == 0 then
+        for _, value in ipairs(migrationList) do
+            activeList[#activeList + 1] = value
+        end
+        db.customTrackedSpells = {}
+    elseif type(db.customTrackedSpells) ~= "table" then
+        db.customTrackedSpells = {}
+    end
+
+    local normalized = {}
+    local seen = {}
+    for _, value in ipairs(activeList) do
+        local spellID = plainNumber(value)
+        if spellID and numberGT(spellID, 0) and not seen[spellID] then
+            seen[spellID] = true
+            normalized[#normalized + 1] = spellID
+        end
+    end
+
+    db.customTrackedSpellsByCharacter[characterKey] = normalized
+    return db.customTrackedSpellsByCharacter[characterKey]
+end
+
+local function getCustomTrackedSpells()
+    if not HealingPriorityMouseDB then
+        return {}
+    end
+    return sanitizeCustomTrackedSpellsInDB()
+end
+
+local function isValidSpellID(spellID)
+    if not spellID then
+        return false
+    end
+    local name = getSpellName(spellID)
+    if name and name ~= "" then
+        return true
+    end
+    return false
+end
+
+local function getSpellLabel(spellID)
+    local name = getSpellName(spellID)
+    if name and name ~= "" then
+        return name .. " (" .. tostring(spellID) .. ")"
+    end
+    return "Unknown spell (" .. tostring(spellID) .. ")"
+end
+
+local function addSpellOption(options, seen, spellID)
+    local id = plainNumber(spellID)
+    if not id or not numberGT(id, 0) or seen[id] then
+        return
+    end
+    if not isSpellKnownSafe(id) then
+        return
+    end
+    local isPassive = false
+    if IsPassiveSpell then
+        local okPassive, resultPassive = pcall(IsPassiveSpell, id)
+        if okPassive and resultPassive then
+            isPassive = true
+        end
+    end
+    if isPassive then
+        return
+    end
+
+    seen[id] = true
+    options[#options + 1] = {
+        spellID = id,
+        label = getSpellLabel(id),
+    }
+end
+
+local CLASS_SPELL_KEYS = {
+    DRUID = { "Lifebloom", "CenarionWard" },
+    PALADIN = { "Consecration", "HolyBulwark" },
+    MONK = { "RenewingMist", "StrengthOfTheBlackOx" },
+    SHAMAN = { "WaterShield", "HealingRain", "Riptide", "CloudburstTotem" },
+    EVOKER = { "Reversion", "Echo", "Lifespark" },
+    PRIEST = { "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
+}
+
+local function collectKnownClassSpellOptions()
+    local options = {}
+    local seen = {}
+
+    local bookType = _G.BOOKTYPE_SPELL or "spell"
+    if GetNumSpellTabs and GetSpellTabInfo and GetSpellBookItemInfo then
+        local okTabs, numTabs = pcall(GetNumSpellTabs)
+        if okTabs and type(numTabs) == "number" then
+            for tabIndex = 1, numTabs do
+                local okTab, _, _, offset, numSpells = pcall(GetSpellTabInfo, tabIndex)
+                if okTab and type(offset) == "number" and type(numSpells) == "number" then
+                    for slot = (offset + 1), (offset + numSpells) do
+                        local okItem, spellType, spellID = pcall(GetSpellBookItemInfo, slot, bookType)
+                        if okItem and spellType == "SPELL" then
+                            addSpellOption(options, seen, spellID)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local classToken = select(2, UnitClass("player"))
+    local classKeys = CLASS_SPELL_KEYS[classToken] or {}
+
+    for _, key in ipairs(classKeys) do
+        local spellID = resolveSpellID(key)
+        addSpellOption(options, seen, spellID)
+    end
+
+    table.sort(options, function(left, right)
+        return string.lower(left.label or "") < string.lower(right.label or "")
+    end)
+
+    return options
+end
+
+local function addCustomTrackedSpell(spellID)
+    local id = plainNumber(spellID)
+    if not id or not numberGT(id, 0) then
+        return false, "invalid"
+    end
+    if not isValidSpellID(id) then
+        return false, "not-found"
+    end
+
+    local spells = getCustomTrackedSpells()
+    for _, existing in ipairs(spells) do
+        if existing == id then
+            return false, "duplicate"
+        end
+    end
+
+    spells[#spells + 1] = id
+    return true
+end
+
+local function removeCustomTrackedSpell(spellID)
+    local id = plainNumber(spellID)
+    if not id then
+        return false
+    end
+
+    local spells = getCustomTrackedSpells()
+    local removed = false
+    local filtered = {}
+    for _, existing in ipairs(spells) do
+        if existing == id and not removed then
+            removed = true
+        else
+            filtered[#filtered + 1] = existing
+        end
+    end
+
+    if removed then
+        HealingPriorityMouseDB.customTrackedSpells = filtered
+    end
+    return removed
+end
+
 local function getAuraStackCountSafe(unit, spellID, helpful, fromPlayer)
     if not unit or not UnitExists(unit) then
         return nil
@@ -363,20 +586,38 @@ local function shouldGlowEntry(entry)
 
     if rule.mode == "chargesAtMax" then
         local charges = getSafeCharges(entry.spellID)
-        if not charges then
-            logGlowDecision(entry, false, "charges-missing")
-            return false
+        local current = charges and charges.current
+        local max = charges and charges.max
+
+        if charges and not charges.unknown and current and max then
+            updateCachedGlowState(entry.spellID, {
+                current = current,
+                max = max,
+            })
+        else
+            local cached = getCachedGlowState(entry.spellID)
+            if cached and cached.current and cached.max then
+                current = cached.current
+                max = cached.max
+                logGlowDecision(entry, false, charges and "charges-cached-unknown" or "charges-cached-missing")
+            elseif not charges then
+                logGlowDecision(entry, false, "charges-missing")
+                return false
+            elseif charges.unknown then
+                logGlowDecision(entry, false, "charges-unknown")
+                return false
+            end
         end
-        if charges.unknown then
-            logGlowDecision(entry, false, "charges-unknown")
-            return false
-        end
-        if not (charges.current and charges.max and numberGT(charges.max, 1)) then
+
+        if not (current and max and numberGT(max, 1)) then
             logGlowDecision(entry, false, "charges-not-multi")
             return false
         end
 
-        local shouldGlow = numberGE(charges.current, charges.max)
+        local shouldGlow = numberGE(current, max)
+        updateCachedGlowState(entry.spellID, {
+            shouldGlow = shouldGlow,
+        })
         logGlowDecision(entry, shouldGlow, shouldGlow and "charges-at-max" or "charges-below-max")
         return shouldGlow
     end
@@ -387,13 +628,34 @@ local function shouldGlowEntry(entry)
             stackCount = entry.glowContext and plainNumber(entry.glowContext.stackCount)
         end
 
+        if stackCount then
+            updateCachedGlowState(entry.spellID, {
+                stackCount = stackCount,
+            })
+        else
+            local cached = getCachedGlowState(entry.spellID)
+            if cached and cached.stackCount then
+                stackCount = cached.stackCount
+            end
+        end
+
         if not stackCount then
-            logGlowDecision(entry, false, "stack-missing")
+            local auraActive = isAuraActive("player", entry.spellID, true, true)
+            local cached = getCachedGlowState(entry.spellID)
+            if auraActive and cached and cached.shouldGlow ~= nil then
+                logGlowDecision(entry, cached.shouldGlow, "stack-missing-use-cached-decision")
+                return cached.shouldGlow
+            end
+            logGlowDecision(entry, false, auraActive and "stack-missing-aura-active" or "stack-missing")
             return false
         end
 
         local threshold = plainNumber(rule.threshold) or 1
         local shouldGlow = numberGE(stackCount, threshold)
+        updateCachedGlowState(entry.spellID, {
+            shouldGlow = shouldGlow,
+            stackCount = stackCount,
+        })
         logGlowDecision(entry, shouldGlow, shouldGlow and "stack-threshold-met" or "stack-threshold-not-met")
         return shouldGlow
     end
@@ -678,6 +940,7 @@ local function hideAllIcons()
         if frame.glow then
             frame.glow:Hide()
         end
+        frame.glowEnabled = false
         frame:Hide()
     end
 end
@@ -686,6 +949,10 @@ local function setIconGlow(frame, enabled)
     if not frame then
         return
     end
+    if frame.glowEnabled == enabled then
+        return
+    end
+    frame.glowEnabled = enabled
     if enabled then
         if frame.glow then
             frame.glow:Show()
@@ -718,9 +985,13 @@ local function buildEntries()
 
     local mouseover = getFriendlyMouseover()
     local entries = {}
+    local addedSpellIDs = {}
 
     local function addEntry(name, spellID, iconCount, glowRule, glowContext)
         if not spellID then
+            return
+        end
+        if addedSpellIDs[spellID] then
             return
         end
         entries[#entries + 1] = {
@@ -731,6 +1002,7 @@ local function buildEntries()
             glowRule = glowRule,
             glowContext = glowContext,
         }
+        addedSpellIDs[spellID] = true
     end
 
     if specID == 105 then
@@ -839,6 +1111,13 @@ local function buildEntries()
         end
     end
 
+    local customSpells = getCustomTrackedSpells()
+    for _, customSpellID in ipairs(customSpells) do
+        if isSpellKnownSafe(customSpellID) and getCooldownReady(customSpellID) then
+            addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
+        end
+    end
+
     return entries
 end
 
@@ -885,7 +1164,10 @@ local function layoutEntries(entries)
         end
 
         if C_Spell and C_Spell.GetSpellCooldown then
-            local info = C_Spell.GetSpellCooldown(entries[i].spellID)
+            local ok, info = pcall(C_Spell.GetSpellCooldown, entries[i].spellID)
+            if not ok then
+                info = nil
+            end
             local startTime = info and plainNumber(info.startTime)
             local duration = info and plainNumber(info.duration)
             local isOnGCD = info and isTrueFlag(info.isOnGCD, false)
@@ -963,6 +1245,59 @@ local function refreshOptionsControls()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+
+    if optionsControls.customSpellDropdown then
+        local spellOptions = collectKnownClassSpellOptions()
+        optionsControls.customSpellOptions = spellOptions
+
+        local selectedSpellID = optionsControls.selectedCustomSpellID
+        local hasSelected = false
+        if selectedSpellID then
+            for _, option in ipairs(spellOptions) do
+                if option.spellID == selectedSpellID then
+                    hasSelected = true
+                    break
+                end
+            end
+        end
+
+        if not hasSelected then
+            selectedSpellID = spellOptions[1] and spellOptions[1].spellID or nil
+            optionsControls.selectedCustomSpellID = selectedSpellID
+        end
+
+        if selectedSpellID then
+            UIDropDownMenu_SetText(optionsControls.customSpellDropdown, getSpellLabel(selectedSpellID))
+            optionsControls.addSpellButton:Enable()
+        else
+            UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "No class spells available")
+            optionsControls.addSpellButton:Disable()
+        end
+    end
+
+    if optionsControls.customSpellRows then
+        local spells = getCustomTrackedSpells()
+        for index, row in ipairs(optionsControls.customSpellRows) do
+            local spellID = spells[index]
+            row.spellID = spellID
+            if spellID then
+                row.label:SetText(getSpellLabel(spellID))
+                row.removeBtn:Enable()
+                row:Show()
+            else
+                row.label:SetText("-")
+                row.removeBtn:Disable()
+                row:Hide()
+            end
+        end
+        if optionsControls.customSpellEmpty then
+            if #spells == 0 then
+                optionsControls.customSpellEmpty:Show()
+            else
+                optionsControls.customSpellEmpty:Hide()
+            end
+        end
+    end
 end
 
 local function createOptionsFrame()
@@ -971,7 +1306,7 @@ local function createOptionsFrame()
     end
 
     local frame = CreateFrame("Frame", "HealingPriorityMouseOptionsFrame", UIParent, "BasicFrameTemplateWithInset")
-    frame:SetSize(430, 470)
+    frame:SetSize(430, 600)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
     frame:SetMovable(true)
@@ -1157,6 +1492,106 @@ local function createOptionsFrame()
         end
     end)
 
+    local customSpellsLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    customSpellsLabel:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -24)
+    customSpellsLabel:SetText("Custom tracked spells")
+
+    local customSpellDropdown = CreateFrame("Frame", "HealingPriorityMouseCustomSpellDropdown", frame, "UIDropDownMenuTemplate")
+    customSpellDropdown:SetPoint("TOPLEFT", customSpellsLabel, "BOTTOMLEFT", -16, -2)
+    UIDropDownMenu_SetWidth(customSpellDropdown, 220)
+    UIDropDownMenu_Initialize(customSpellDropdown, function(self, level)
+        local options = (optionsControls and optionsControls.customSpellOptions) or {}
+        if #options == 0 then
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "No class spells available"
+            info.disabled = true
+            UIDropDownMenu_AddButton(info, level)
+            return
+        end
+
+        for _, option in ipairs(options) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = option.label
+            info.value = option.spellID
+            info.checked = (optionsControls and optionsControls.selectedCustomSpellID == option.spellID)
+            info.func = function()
+                if optionsControls then
+                    optionsControls.selectedCustomSpellID = option.spellID
+                    UIDropDownMenu_SetText(customSpellDropdown, option.label)
+                end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    local addSpellButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    addSpellButton:SetSize(64, 24)
+    addSpellButton:SetPoint("LEFT", customSpellDropdown, "RIGHT", -4, 2)
+    addSpellButton:SetText("Add")
+
+    local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    customSpellHint:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -6)
+    customSpellHint:SetText("Dropdown shows known spells for this character class.")
+
+    local customSpellEmpty = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    customSpellEmpty:SetPoint("TOPLEFT", customSpellHint, "BOTTOMLEFT", -2, -10)
+    customSpellEmpty:SetText("No custom spells added.")
+
+    local customSpellRows = {}
+    local firstRowAnchor = customSpellEmpty
+    for i = 1, 8 do
+        local row = CreateFrame("Frame", nil, frame)
+        row:SetSize(360, 20)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", firstRowAnchor, "BOTTOMLEFT", 0, -8)
+        else
+            row:SetPoint("TOPLEFT", customSpellRows[i - 1], "BOTTOMLEFT", 0, -4)
+        end
+
+        local rowLabel = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        rowLabel:SetPoint("LEFT", row, "LEFT", 0, 0)
+        rowLabel:SetWidth(280)
+        rowLabel:SetJustifyH("LEFT")
+
+        local removeButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        removeButton:SetSize(64, 18)
+        removeButton:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        removeButton:SetText("Remove")
+        removeButton:SetScript("OnClick", function(self)
+            if row.spellID and removeCustomTrackedSpell(row.spellID) then
+                refresh()
+                refreshOptionsControls()
+            end
+            self:ClearFocus()
+        end)
+
+        row.label = rowLabel
+        row.removeBtn = removeButton
+        row:Hide()
+        customSpellRows[i] = row
+    end
+
+    local function handleAddCustomSpell()
+        local spellID = optionsControls and optionsControls.selectedCustomSpellID
+        local ok, reason = addCustomTrackedSpell(spellID)
+        if ok then
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        if reason == "duplicate" then
+            msg("custom spell already tracked")
+        elseif reason == "not-found" then
+            msg("selected spell is not available on this client")
+        else
+            msg("select a spell from the dropdown first")
+        end
+    end
+
+    addSpellButton:SetScript("OnClick", function()
+        handleAddCustomSpell()
+    end)
+
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     closeBtn:SetSize(90, 24)
     closeBtn:SetPoint("BOTTOMRIGHT", -14, 12)
@@ -1175,6 +1610,12 @@ local function createOptionsFrame()
         scaleInput = scaleInput,
         opacitySlider = opacitySlider,
         opacityInput = opacityInput,
+        customSpellDropdown = customSpellDropdown,
+        customSpellOptions = {},
+        selectedCustomSpellID = nil,
+        addSpellButton = addSpellButton,
+        customSpellRows = customSpellRows,
+        customSpellEmpty = customSpellEmpty,
     }
 
     frame:SetScript("OnShow", function()
@@ -1209,6 +1650,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             return
         end
         copyDefaults(HealingPriorityMouseDB, defaults)
+        sanitizeCustomTrackedSpellsInDB()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
@@ -1218,10 +1660,20 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if not arg1:match("^party") and not arg1:match("^raid") then
             return
         end
+
+        local now = getNowTime()
+        if (now - lastGroupAuraRefresh) < GROUP_AURA_REFRESH_INTERVAL then
+            return
+        end
+        lastGroupAuraRefresh = now
     end
 
     if event == "UNIT_POWER_UPDATE" and arg1 ~= "player" then
         return
+    end
+
+    if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        refreshOptionsControls()
     end
 
     refresh()

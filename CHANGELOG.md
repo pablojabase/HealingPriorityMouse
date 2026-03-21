@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.13-beta.1] - 2026-03-21
+## [1.0.14-beta.1] - 2026-03-21
 
 ### Added
 - Added conditional icon glow support for threshold-based readiness cues.
@@ -10,9 +10,13 @@ All notable changes to this project are documented in this file.
 - Added `Lightweaver` glow condition when player aura stacks reach threshold.
 - Added `/hpm glow on|off` to enable/disable conditional glow highlights.
 - Added `/hpm glowdebug on|off` for guarded glow decision diagnostics.
+- Added options UI controls to add/remove custom tracked spells using a class-spell dropdown and `Add` button.
+- Added custom tracked spell rendering to the icon row when those spells are known and ready.
 
 ### Changed
 - Glow condition evaluators use secret/protected-safe coercion and fail-safe defaults to avoid PW:S-style restricted-value regressions.
+- Added persistence sanitization and deduplication for custom tracked spell IDs.
+- Custom tracked spell configuration is now character-specific.
 
 ## [1.0.12] - 2026-03-11
 

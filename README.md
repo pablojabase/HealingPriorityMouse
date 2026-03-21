@@ -7,6 +7,8 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 ## What It Does
 
 - Shows a compact icon row near your cursor for healer priorities.
+- Lets you add your own tracked spells from an in-game class spell dropdown (`Add` button + removable list).
+- Keeps custom tracked spell lists character-specific to avoid cross-character bleed.
 - Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) suitable for current patch lines.
 - Does not perform protected actions (no auto-cast, no targeting automation).
 
