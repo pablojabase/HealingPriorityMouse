@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.7] - 2026-03-22
+
+### Fixed
+- Updated Discipline `Penance` and `Power Word: Radiance` glow conditions to trigger only at max charges.
+- Prevented constant glow on those Disc entries when charges are not capped.
+
 ## [1.0.14-beta.6] - 2026-03-22
 
 ### Fixed

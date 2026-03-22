@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.6"
+local ADDON_VERSION = "1.0.14-beta.7"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -130,10 +130,10 @@ local GLOW_RULES = {
         mode = "chargesAtMax",
     },
     PowerWordRadiance = {
-        mode = "alwaysWhenShown",
+        mode = "chargesAtMax",
     },
     Penance = {
-        mode = "alwaysWhenShown",
+        mode = "chargesAtMax",
     },
     Lightweaver = {
         mode = "stackAtLeast",
