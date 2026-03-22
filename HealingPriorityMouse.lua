@@ -1362,7 +1362,7 @@ local function buildEntries()
         end
     elseif specID == 270 then
         local renewingMistID = resolveSpellID("RenewingMist")
-        if renewingMistID and getCooldownReady(renewingMistID)
+        if renewingMistID and hasAvailableChargeOrReady(renewingMistID)
             and (isSpellAtMaxCharges(renewingMistID) or isAuraMissingOnMouseover(renewingMistID)) then
             addEntry("Renewing Mist", renewingMistID, nil, "RenewingMist")
         end
@@ -1384,7 +1384,7 @@ local function buildEntries()
             addEntry("Healing Rain", healingRainID)
         end
         local riptideID = resolveSpellID("Riptide")
-        if riptideID and getCooldownReady(riptideID)
+        if riptideID and hasAvailableChargeOrReady(riptideID)
             and (isSpellAtMaxCharges(riptideID) or isAuraMissingOnMouseover(riptideID)) then
             addEntry("Riptide", riptideID)
         end
@@ -1394,7 +1394,7 @@ local function buildEntries()
         end
     elseif specID == 1468 then
         local reversionID = resolveSpellID("Reversion")
-        if reversionID and getCooldownReady(reversionID) then
+        if reversionID and hasAvailableChargeOrReady(reversionID) then
             if mouseover then
                 if isSpellAtMaxCharges(reversionID) or not isAuraActive(mouseover, reversionID, true, true) then
                     addEntry("Reversion", reversionID)
