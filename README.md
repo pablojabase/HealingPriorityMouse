@@ -18,7 +18,6 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm options`: open in-game options window
 - `/hpm version`: print current addon version
 - `/hpm toggle`: enable/disable addon display
-- `/hpm undergrowth on|off|auto`: control Lifebloom target count logic
 - `/hpm scale <number>`: set icon scale from `0.6` to `3.0` (example: `/hpm scale 1.2`)
 - `/hpm opacity <0-100>`: set icon opacity percentage
 - `/hpm names on|off`: show or hide spell names under/over icons

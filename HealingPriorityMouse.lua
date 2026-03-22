@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.1"
+local ADDON_VERSION = "1.0.14-beta.2"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -9,14 +9,52 @@ local defaults = {
     opacity = 1.0,
     showSpellNames = false,
     spellNamePosition = "bottom", -- bottom | top
-    undergrowthMode = "auto", -- auto | on | off
     showCharges = true,
     showGlows = true,
     glowDebug = false,
+    devLiveLogging = false,
     customTrackedSpells = {},
     customTrackedSpellsByCharacter = {},
     customTrackedSpecsInitializedByCharacter = {},
 }
+
+local DEV_LOG_MAX_LINES = 300
+local devLogLines = {}
+local debugLogWindow
+local debugLogScroll
+local debugLogEditBox
+local lastLiveLogSignature
+
+local function getLogTimestamp()
+    if date then
+        local ok, stamp = pcall(date, "%H:%M:%S")
+        if ok and stamp then
+            return stamp
+        end
+    end
+    return "--:--:--"
+end
+
+local function updateDebugLogWindowText()
+    if not (debugLogEditBox and debugLogScroll) then
+        return
+    end
+
+    debugLogEditBox:SetText(table.concat(devLogLines, "\n"))
+
+    local scrollHeight = debugLogScroll:GetHeight() or 0
+    local textHeight = debugLogEditBox:GetHeight() or 0
+    debugLogScroll:SetVerticalScroll(math.max(0, textHeight - scrollHeight))
+end
+
+local function appendDevLogLine(text)
+    local line = "[" .. getLogTimestamp() .. "] " .. tostring(text or "")
+    devLogLines[#devLogLines + 1] = line
+    while #devLogLines > DEV_LOG_MAX_LINES do
+        table.remove(devLogLines, 1)
+    end
+    updateDebugLogWindowText()
+end
 
 local function copyDefaults(dst, src)
     for k, v in pairs(src) do
@@ -32,6 +70,7 @@ local function copyDefaults(dst, src)
 end
 
 local function msg(text)
+    appendDevLogLine("MSG: " .. tostring(text))
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ccffHealingPriorityMouse|r: " .. tostring(text))
 end
 
@@ -55,7 +94,6 @@ end
 local SPELLS = {
     Lifebloom = { 33763 },
     CenarionWard = { 102351 },
-    UndergrowthTalent = { 203374 },
 
     Consecration = { 26573 },
     ConsecrationAura = { 188370 },
@@ -949,28 +987,6 @@ getSpecID = function()
 end
 
 local function getLifebloomTargetThreshold()
-    local mode = HealingPriorityMouseDB.undergrowthMode
-    if mode == "on" then
-        return 2
-    end
-    if mode == "off" then
-        return 1
-    end
-    -- Auto detection: try modern talent node first, then older spell-based fallback.
-    local configID = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
-    if configID and C_Traits and C_Traits.GetNodeInfo then
-        -- NodeID observed in the WA load.talent mapping for Undergrowth.
-        local nodeInfo = C_Traits.GetNodeInfo(configID, 103133)
-        if isNodeRankActive(nodeInfo) then
-            return 2
-        end
-    end
-
-    -- Legacy fallback for old spell-based talent IDs.
-    local undergrowthID = resolveSpellID("UndergrowthTalent")
-    if undergrowthID and isSpellKnownSafe(undergrowthID) then
-        return 2
-    end
     return 1
 end
 
@@ -1137,6 +1153,26 @@ local function getEssenceCount()
     return essence or 0
 end
 
+local function isAuraMissingOnMouseover(spellID)
+    local mouseover = getFriendlyMouseover()
+    if not mouseover then
+        return true
+    end
+    return not isAuraActive(mouseover, spellID, true, true)
+end
+
+local function isSpellAtMaxCharges(spellID)
+    local charges = getSafeCharges(spellID)
+    local current = charges and charges.current
+    local max = charges and charges.max
+    return charges
+        and (not charges.unknown)
+        and current
+        and max
+        and numberGT(max, 1)
+        and numberGE(current, max)
+end
+
 local function buildEntries()
     local specID = getSpecID()
     if not specID then
@@ -1190,7 +1226,8 @@ local function buildEntries()
             addEntry("Lifebloom", lifebloomID)
         end
         local cenWardID = resolveSpellID("CenarionWard")
-        if mouseover and cenWardID and getCooldownReady(cenWardID) then
+        if mouseover and cenWardID and getCooldownReady(cenWardID)
+            and not isAuraActive(mouseover, cenWardID, true, true) then
             addEntry("Cenarion Ward", cenWardID)
         end
     elseif specID == 65 then
@@ -1205,12 +1242,14 @@ local function buildEntries()
             addEntry("Infusion of Light", infusionID)
         end
         local holyBulwarkID = resolveSpellID("HolyBulwark")
-        if holyBulwarkID and getCooldownReady(holyBulwarkID) then
+        if holyBulwarkID and getCooldownReady(holyBulwarkID)
+            and not isAuraActive("player", holyBulwarkID, true, true) then
             addEntry("Holy Bulwark", holyBulwarkID)
         end
     elseif specID == 270 then
         local renewingMistID = resolveSpellID("RenewingMist")
-        if renewingMistID and getCooldownReady(renewingMistID) then
+        if renewingMistID and getCooldownReady(renewingMistID)
+            and (isSpellAtMaxCharges(renewingMistID) or isAuraMissingOnMouseover(renewingMistID)) then
             addEntry("Renewing Mist", renewingMistID, nil, "RenewingMist")
         end
         local blackOxID = resolveSpellID("StrengthOfTheBlackOx")
@@ -1227,7 +1266,8 @@ local function buildEntries()
             addEntry("Healing Rain", healingRainID)
         end
         local riptideID = resolveSpellID("Riptide")
-        if riptideID and getCooldownReady(riptideID) then
+        if riptideID and getCooldownReady(riptideID)
+            and (isSpellAtMaxCharges(riptideID) or isAuraMissingOnMouseover(riptideID)) then
             addEntry("Riptide", riptideID)
         end
         local cloudburstID = resolveSpellID("CloudburstTotem")
@@ -1238,7 +1278,7 @@ local function buildEntries()
         local reversionID = resolveSpellID("Reversion")
         if reversionID and getCooldownReady(reversionID) then
             if mouseover then
-                if not isAuraActive(mouseover, reversionID, true, true) then
+                if isSpellAtMaxCharges(reversionID) or not isAuraActive(mouseover, reversionID, true, true) then
                     addEntry("Reversion", reversionID)
                 end
             else
@@ -1265,12 +1305,12 @@ local function buildEntries()
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
-        if pwsID and getCooldownReady(pwsID) then
+        if pwsID and getCooldownReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
             addEntry("Power Word: Shield", pwsID)
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
-        if pomID and getCooldownReady(pomID) then
+        if pomID and getCooldownReady(pomID) and isAuraMissingOnMouseover(pomID) then
             addEntry("Prayer of Mending", pomID)
         end
         local haloID = resolveSpellID("Halo")
@@ -1401,10 +1441,29 @@ root:SetScript("OnUpdate", function()
 end)
 
 local function refresh()
-    layoutEntries(buildEntries())
+    local entries = buildEntries()
+    layoutEntries(entries)
+
+    if HealingPriorityMouseDB and HealingPriorityMouseDB.devLiveLogging then
+        local parts = {}
+        for _, entry in ipairs(entries) do
+            parts[#parts + 1] = tostring(entry.name or "?") .. "(" .. tostring(entry.spellID or "?") .. ")"
+        end
+        local signature = (#parts > 0) and table.concat(parts, ", ") or "none"
+        if signature ~= lastLiveLogSignature then
+            appendDevLogLine("LIVE recommendations: " .. signature)
+            lastLiveLogSignature = signature
+        end
+    end
 end
 
 local refreshOptionsControls
+
+local function safeRefreshOptionsControls()
+    if refreshOptionsControls then
+        refreshOptionsControls()
+    end
+end
 
 local function ensureCustomSpellRow(index)
     if not optionsControls or not optionsControls.customSpellListContent then
@@ -1440,7 +1499,7 @@ local function ensureCustomSpellRow(index)
     removeButton:SetScript("OnClick", function()
         if row.spellID and removeCustomTrackedSpell(row.spellID) then
             refresh()
-            refreshOptionsControls()
+            safeRefreshOptionsControls()
         end
     end)
 
@@ -1463,7 +1522,6 @@ refreshOptionsControls = function()
     optionsControls.charges:SetChecked(db.showCharges and true or false)
     optionsControls.showNames:SetChecked(db.showSpellNames and true or false)
 
-    UIDropDownMenu_SetSelectedValue(optionsControls.undergrowth, db.undergrowthMode)
     UIDropDownMenu_SetSelectedValue(optionsControls.namePosition, db.spellNamePosition)
 
     local scaleValue = clampScale(tonumber(db.scale) or 1.0) or 1.0
@@ -1473,6 +1531,10 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+
+    if optionsControls.liveLoggingToggle then
+        optionsControls.liveLoggingToggle:SetChecked(db.devLiveLogging and true or false)
+    end
 
     if optionsControls.customSpellDropdown then
         local spellOptions = collectKnownClassSpellOptions()
@@ -1556,6 +1618,82 @@ refreshOptionsControls = function()
     end
 end
 
+local function createDebugLogWindow()
+    if debugLogWindow then
+        return debugLogWindow
+    end
+
+    local frame = CreateFrame("Frame", "HealingPriorityMouseDebugLogFrame", UIParent, "BasicFrameTemplateWithInset")
+    frame:SetSize(700, 420)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+    end)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+    end)
+    frame:Hide()
+
+    frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    frame.title:SetPoint("LEFT", frame.TitleBg, "LEFT", 8, 0)
+    frame.title:SetText("HealingPriorityMouse Dev Logs")
+
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 14, -34)
+    scroll:SetPoint("BOTTOMRIGHT", -34, 46)
+
+    local edit = CreateFrame("EditBox", nil, scroll)
+    edit:SetAutoFocus(false)
+    edit:SetMultiLine(true)
+    edit:SetFontObject(ChatFontNormal)
+    edit:SetWidth(620)
+    edit:SetHeight(1)
+    edit:SetTextInsets(2, 2, 2, 2)
+    edit:EnableMouse(true)
+    edit:SetScript("OnTextChanged", function(self)
+        local text = self:GetText() or ""
+        local lines = 1
+        for _ in string.gmatch(text, "\n") do
+            lines = lines + 1
+        end
+        local _, lineHeight = self:GetFont()
+        lineHeight = tonumber(lineHeight) or 12
+        local estimatedHeight = (lines * lineHeight) + 8
+        self:SetHeight(math.max((scroll:GetHeight() or 1) - 4, estimatedHeight))
+    end)
+    scroll:SetScrollChild(edit)
+
+    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    closeBtn:SetSize(90, 24)
+    closeBtn:SetPoint("BOTTOMRIGHT", -14, 12)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function()
+        frame:Hide()
+    end)
+
+    local clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    clearBtn:SetSize(90, 24)
+    clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
+    clearBtn:SetText("Clear")
+    clearBtn:SetScript("OnClick", function()
+        for i = #devLogLines, 1, -1 do
+            devLogLines[i] = nil
+        end
+        lastLiveLogSignature = nil
+        updateDebugLogWindowText()
+    end)
+
+    debugLogWindow = frame
+    debugLogScroll = scroll
+    debugLogEditBox = edit
+    updateDebugLogWindowText()
+    return debugLogWindow
+end
+
 local function createOptionsFrame()
     if optionsFrame then
         return optionsFrame
@@ -1591,8 +1729,34 @@ local function createOptionsFrame()
     frame.title:SetPoint("LEFT", frame.TitleBg, "LEFT", 8, 0)
     frame.title:SetText("HealingPriorityMouse Options")
 
+    local tabGeneral = CreateFrame("Button", nil, frame, "PanelTabButtonTemplate")
+    tabGeneral:SetID(1)
+    tabGeneral:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -30)
+    tabGeneral:SetText("General")
+    if PanelTemplates_TabResize then
+        PanelTemplates_TabResize(tabGeneral, 0)
+    else
+        tabGeneral:SetWidth(90)
+    end
+
+    local tabDevtools = CreateFrame("Button", nil, frame, "PanelTabButtonTemplate")
+    tabDevtools:SetID(2)
+    tabDevtools:SetPoint("LEFT", tabGeneral, "RIGHT", -14, 0)
+    tabDevtools:SetText("Devtools")
+    if PanelTemplates_TabResize then
+        PanelTemplates_TabResize(tabDevtools, 0)
+    else
+        tabDevtools:SetWidth(90)
+    end
+
+    if PanelTemplates_SetNumTabs then
+        PanelTemplates_SetNumTabs(frame, 2)
+    end
+
+    local contentTopY = -62
+
     local enabled = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
-    enabled:SetPoint("TOPLEFT", 16, -36)
+    enabled:SetPoint("TOPLEFT", 16, contentTopY)
     enabled.Text:SetText("Enable addon display")
     enabled:SetScript("OnClick", function(self)
         HealingPriorityMouseDB.enabled = self:GetChecked() and true or false
@@ -1640,34 +1804,8 @@ local function createOptionsFrame()
         addOption("Above icon", "top")
     end)
 
-    local undergrowthLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    undergrowthLabel:SetPoint("TOPLEFT", namePosition, "BOTTOMLEFT", 16, -18)
-    undergrowthLabel:SetText("Undergrowth mode")
-
-    local undergrowth = CreateFrame("Frame", "HealingPriorityMouseUndergrowthDropdown", frame, "UIDropDownMenuTemplate")
-    undergrowth:SetPoint("TOPLEFT", undergrowthLabel, "BOTTOMLEFT", -16, -4)
-    UIDropDownMenu_SetWidth(undergrowth, 120)
-    UIDropDownMenu_Initialize(undergrowth, function(self, level)
-        local function addOption(label, value)
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = label
-            info.value = value
-            info.checked = (HealingPriorityMouseDB.undergrowthMode == value)
-            info.func = function()
-                HealingPriorityMouseDB.undergrowthMode = value
-                UIDropDownMenu_SetSelectedValue(self, value)
-                refresh()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-
-        addOption("Auto", "auto")
-        addOption("On", "on")
-        addOption("Off", "off")
-    end)
-
     local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    scaleLabel:SetPoint("TOPLEFT", undergrowth, "BOTTOMLEFT", 16, -20)
+    scaleLabel:SetPoint("TOPLEFT", namePosition, "BOTTOMLEFT", 16, -20)
     scaleLabel:SetText("Scale")
 
     local scaleSlider = CreateFrame("Slider", "HealingPriorityMouseScaleSlider", frame, "OptionsSliderTemplate")
@@ -1807,12 +1945,40 @@ local function createOptionsFrame()
 
     local customSpellRows = {}
 
+    local devtoolsTitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    devtoolsTitle:SetPoint("TOPLEFT", 16, contentTopY)
+    devtoolsTitle:SetText("Developer tools")
+
+    local liveLoggingToggle = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    liveLoggingToggle:SetPoint("TOPLEFT", devtoolsTitle, "BOTTOMLEFT", 0, -10)
+    liveLoggingToggle.Text:SetText("Enable live logging")
+    liveLoggingToggle:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.devLiveLogging = self:GetChecked() and true or false
+        lastLiveLogSignature = nil
+        appendDevLogLine("LIVE logging " .. (HealingPriorityMouseDB.devLiveLogging and "enabled" or "disabled"))
+    end)
+
+    local openLogsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    openLogsBtn:SetSize(180, 24)
+    openLogsBtn:SetPoint("TOPLEFT", liveLoggingToggle, "BOTTOMLEFT", 4, -12)
+    openLogsBtn:SetText("Open log display")
+    openLogsBtn:SetScript("OnClick", function()
+        local logFrame = createDebugLogWindow()
+        logFrame:Show()
+        logFrame:Raise()
+        updateDebugLogWindowText()
+    end)
+
+    local devtoolsHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    devtoolsHint:SetPoint("TOPLEFT", openLogsBtn, "BOTTOMLEFT", 0, -10)
+    devtoolsHint:SetText("Shows a live tail of addon logs for troubleshooting.")
+
     local function applyOptionsLayout()
         local width = frame:GetWidth()
         local rightColumnLeft = math.max(330, math.floor(width * 0.56))
 
         customSpellsLabel:ClearAllPoints()
-        customSpellsLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", rightColumnLeft, -36)
+        customSpellsLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", rightColumnLeft, contentTopY)
 
         customSpellDropdown:ClearAllPoints()
         customSpellDropdown:SetPoint("TOPLEFT", customSpellsLabel, "BOTTOMLEFT", -16, -2)
@@ -1829,6 +1995,42 @@ local function createOptionsFrame()
         customSpellListScroll:ClearAllPoints()
         customSpellListScroll:SetPoint("TOPLEFT", customSpellHint, "BOTTOMLEFT", 0, -8)
         customSpellListScroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -34, 46)
+    end
+
+    local function setOptionsTab(tab)
+        local showGeneral = (tab == "general")
+        frame.activeTab = tab
+
+        local generalWidgets = optionsControls and optionsControls.generalWidgets or {}
+        local devWidgets = optionsControls and optionsControls.devWidgets or {}
+
+        for _, widget in ipairs(generalWidgets) do
+            if widget and widget.SetShown then
+                widget:SetShown(showGeneral)
+            end
+        end
+        for _, widget in ipairs(devWidgets) do
+            if widget and widget.SetShown then
+                widget:SetShown(not showGeneral)
+            end
+        end
+
+        if PanelTemplates_SetTab then
+            PanelTemplates_SetTab(frame, showGeneral and 1 or 2)
+        else
+            if PanelTemplates_SelectTab and PanelTemplates_DeselectTab then
+                if showGeneral then
+                    PanelTemplates_SelectTab(tabGeneral)
+                    PanelTemplates_DeselectTab(tabDevtools)
+                else
+                    PanelTemplates_SelectTab(tabDevtools)
+                    PanelTemplates_DeselectTab(tabGeneral)
+                end
+            else
+                tabGeneral:Enable(not showGeneral)
+                tabDevtools:Enable(showGeneral)
+            end
+        end
     end
 
     local function handleAddCustomSpell()
@@ -1881,7 +2083,6 @@ local function createOptionsFrame()
         charges = charges,
         showNames = showNames,
         namePosition = namePosition,
-        undergrowth = undergrowth,
         scaleSlider = scaleSlider,
         scaleInput = scaleInput,
         opacitySlider = opacitySlider,
@@ -1894,16 +2095,37 @@ local function createOptionsFrame()
         customSpellListContent = customSpellListContent,
         customSpellRows = customSpellRows,
         customSpellEmpty = customSpellEmpty,
+        liveLoggingToggle = liveLoggingToggle,
+        generalWidgets = {
+            enabled, charges, showNames,
+            namePositionLabel, namePosition,
+            scaleLabel, scaleSlider, scaleInput,
+            opacityLabel, opacitySlider, opacityInput,
+            customSpellsLabel, customSpellDropdown, addSpellButton,
+            customSpellHint, customSpellListScroll,
+        },
+        devWidgets = {
+            devtoolsTitle, liveLoggingToggle, openLogsBtn, devtoolsHint,
+        },
     }
+
+    tabGeneral:SetScript("OnClick", function()
+        setOptionsTab("general")
+    end)
+    tabDevtools:SetScript("OnClick", function()
+        setOptionsTab("devtools")
+    end)
 
     frame:SetScript("OnShow", function()
         applyOptionsLayout()
         refreshOptionsControls()
+        setOptionsTab(frame.activeTab or "general")
     end)
 
     frame:SetScript("OnSizeChanged", function()
         applyOptionsLayout()
         refreshOptionsControls()
+        setOptionsTab(frame.activeTab or "general")
     end)
 
     optionsFrame = frame
@@ -1987,18 +2209,6 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
 
     if cmd == "options" then
         openOptionsFrame()
-        return
-    end
-
-    if cmd == "undergrowth" then
-        if rest == "on" or rest == "off" or rest == "auto" then
-            HealingPriorityMouseDB.undergrowthMode = rest
-            msg("undergrowthMode = " .. rest)
-            refresh()
-            refreshOptionsControls()
-            return
-        end
-        msg("usage: /hpm undergrowth on|off|auto")
         return
     end
 
@@ -2115,7 +2325,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         resolvedSpells = {}
         msg("spell audit for current client:")
         local keys = {
-            "Lifebloom", "CenarionWard", "UndergrowthTalent",
+            "Lifebloom", "CenarionWard",
             "Consecration", "ConsecrationAura", "InfusionOfLight", "HolyBulwark",
             "RenewingMist", "StrengthOfTheBlackOx",
             "WaterShield", "HealingRain", "Riptide", "CloudburstTotem",
@@ -2126,18 +2336,6 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             local spellID = resolveSpellID(key)
             if key == "CloudburstTotem" and not spellID then
                 msg(key .. " -> removed in 12.0.0 (expected missing)")
-            elseif key == "UndergrowthTalent" and not spellID then
-                local configID = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
-                if configID and C_Traits and C_Traits.GetNodeInfo then
-                    local nodeInfo = C_Traits.GetNodeInfo(configID, 103133)
-                    if isNodeRankActive(nodeInfo) then
-                        msg(key .. " -> node 103133 active (ok)")
-                    else
-                        msg(key .. " -> node 103133 not active (ok if not talented)")
-                    end
-                else
-                    msg(key .. " -> missing spell id; node-based detection unavailable")
-                end
             elseif spellID then
                 local known = isSpellKnownSafe(spellID)
                 if known then
@@ -2155,7 +2353,6 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
     msg("enabled=" .. tostring(HealingPriorityMouseDB.enabled)
         .. ", scale=" .. tostring(HealingPriorityMouseDB.scale)
         .. ", opacity=" .. tostring(math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)) .. "%"
-        .. ", undergrowthMode=" .. tostring(HealingPriorityMouseDB.undergrowthMode)
         .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges)
         .. ", showGlows=" .. tostring(HealingPriorityMouseDB.showGlows)
         .. ", glowDebug=" .. tostring(HealingPriorityMouseDB.glowDebug)

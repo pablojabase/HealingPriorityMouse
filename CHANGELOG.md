@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.2] - 2026-03-22
+
+### Added
+- Added a Devtools tab in options with live recommendation logging toggle.
+- Added an in-game debug log window with live tail, clear, and close controls.
+
+### Changed
+- Improved recommendation consistency for aura-maintenance and charge-based spells across healer specs.
+- Refined options layout with clearer two-section organization (General and Devtools).
+
+### Removed
+- Removed obsolete Undergrowth mode logic and related command/UI paths for current Retail behavior.
+
 ## [1.0.14-beta.1] - 2026-03-21
 
 ### Added
