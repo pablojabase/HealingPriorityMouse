@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.3"
+local ADDON_VERSION = "1.0.14-beta.4"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -1083,11 +1083,12 @@ local function ensureIcon(index)
     frame.chargeText = chargeText
 
     local glow = frame:CreateTexture(nil, "OVERLAY")
-    glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
+    glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     glow:SetBlendMode("ADD")
     glow:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    glow:SetSize(56, 56)
-    glow:SetAlpha(0.95)
+    glow:SetSize(42, 42)
+    glow:SetVertexColor(1.0, 0.85, 0.25, 1.0)
+    glow:SetAlpha(0.9)
     glow:Hide()
     frame.glow = glow
 
@@ -1111,9 +1112,6 @@ end
 
 local function hideAllIcons()
     for _, frame in ipairs(iconFrames) do
-        if ActionButton_HideOverlayGlow then
-            ActionButton_HideOverlayGlow(frame)
-        end
         if frame.glowAnim and frame.glowAnim:IsPlaying() then
             frame.glowAnim:Stop()
         end
@@ -1134,10 +1132,6 @@ local function setIconGlow(frame, enabled)
     end
     frame.glowEnabled = enabled
     if enabled then
-        if ActionButton_ShowOverlayGlow then
-            ActionButton_ShowOverlayGlow(frame)
-            return
-        end
         if frame.glow then
             frame.glow:Show()
         end
@@ -1145,10 +1139,6 @@ local function setIconGlow(frame, enabled)
             frame.glowAnim:Play()
         end
         return
-    end
-
-    if ActionButton_HideOverlayGlow then
-        ActionButton_HideOverlayGlow(frame)
     end
 
     if frame.glowAnim and frame.glowAnim:IsPlaying() then
@@ -1532,6 +1522,7 @@ refreshOptionsControls = function()
     local db = HealingPriorityMouseDB
     optionsControls.enabled:SetChecked(db.enabled and true or false)
     optionsControls.charges:SetChecked(db.showCharges and true or false)
+    optionsControls.glows:SetChecked(db.showGlows and true or false)
     optionsControls.showNames:SetChecked(db.showSpellNames and true or false)
 
     UIDropDownMenu_SetSelectedValue(optionsControls.namePosition, db.spellNamePosition)
@@ -1783,8 +1774,16 @@ local function createOptionsFrame()
         refresh()
     end)
 
+    local glows = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    glows:SetPoint("TOPLEFT", charges, "BOTTOMLEFT", 0, -8)
+    glows.Text:SetText("Show glows")
+    glows:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.showGlows = self:GetChecked() and true or false
+        refresh()
+    end)
+
     local showNames = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
-    showNames:SetPoint("TOPLEFT", charges, "BOTTOMLEFT", 0, -8)
+    showNames:SetPoint("TOPLEFT", glows, "BOTTOMLEFT", 0, -8)
     showNames.Text:SetText("Show spell names")
     showNames:SetScript("OnClick", function(self)
         HealingPriorityMouseDB.showSpellNames = self:GetChecked() and true or false
@@ -2093,6 +2092,7 @@ local function createOptionsFrame()
     optionsControls = {
         enabled = enabled,
         charges = charges,
+        glows = glows,
         showNames = showNames,
         namePosition = namePosition,
         scaleSlider = scaleSlider,
@@ -2109,7 +2109,7 @@ local function createOptionsFrame()
         customSpellEmpty = customSpellEmpty,
         liveLoggingToggle = liveLoggingToggle,
         generalWidgets = {
-            enabled, charges, showNames,
+            enabled, charges, glows, showNames,
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
@@ -2279,12 +2279,14 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             HealingPriorityMouseDB.showGlows = true
             msg("showGlows = true")
             refresh()
+            refreshOptionsControls()
             return
         end
         if rest == "off" then
             HealingPriorityMouseDB.showGlows = false
             msg("showGlows = false")
             refresh()
+            refreshOptionsControls()
             return
         end
         msg("usage: /hpm glow on|off")

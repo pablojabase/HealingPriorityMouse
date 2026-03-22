@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.4] - 2026-03-22
+
+### Fixed
+- Reworked icon glow rendering to use an icon-local border glow so the effect is properly aligned on compact icon sizes.
+
+### Added
+- Added a General options checkbox (`Show glows`) to enable/disable glow highlights in the UI.
+- Synced `/hpm glow on|off` with options controls so the checkbox state updates immediately.
+
 ## [1.0.14-beta.3] - 2026-03-22
 
 ### Fixed
