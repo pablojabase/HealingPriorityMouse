@@ -146,6 +146,7 @@ local GLOW_RULES = {
 local glowDebugState = {}
 local glowStateCache = {}
 local GLOW_CACHE_TTL = 20.0
+local CHARGE_CACHE_TTL = 3.0
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 
@@ -166,6 +167,23 @@ local function getCachedGlowState(spellID)
     end
     local age = getNowTime() - (state.time or 0)
     if age > GLOW_CACHE_TTL then
+        return nil
+    end
+    return state
+end
+
+local function getRecentChargeState(spellID)
+    local state = getCachedGlowState(spellID)
+    if not state then
+        return nil
+    end
+    if not (state.current and state.max) then
+        return nil
+    end
+
+    local chargeTime = state.chargeTime or state.time or 0
+    local age = getNowTime() - chargeTime
+    if age > CHARGE_CACHE_TTL then
         return nil
     end
     return state
@@ -863,13 +881,14 @@ local function shouldGlowEntry(entry)
             updateCachedGlowState(entry.spellID, {
                 current = current,
                 max = max,
+                chargeTime = getNowTime(),
             })
         elseif not charges then
             logGlowDecision(entry, false, "charges-missing")
             return false
         elseif charges.unknown then
             if InCombatLockdown and InCombatLockdown() then
-                local cached = getCachedGlowState(entry.spellID)
+                local cached = getRecentChargeState(entry.spellID)
                 if cached and cached.current and cached.max then
                     current = cached.current
                     max = cached.max
@@ -1056,7 +1075,7 @@ local function getCooldownReadyByTimer(spellID, failOpen)
         end
         if info then
             if isFalseFlag(info.isEnabled, false) then
-                return false
+                return allowFailOpen
             end
             local duration = plainNumber(info.duration)
             if duration and numberLE(duration, 0) then
@@ -1339,6 +1358,7 @@ local function hasAvailableChargeOrReady(spellID)
             updateCachedGlowState(spellID, {
                 current = current,
                 max = max,
+                chargeTime = getNowTime(),
             })
         end
         if current and numberGT(current, 0) then
@@ -1358,6 +1378,7 @@ local function hasAvailableChargeOrReadyStrict(spellID)
             updateCachedGlowState(spellID, {
                 current = current,
                 max = max,
+                chargeTime = getNowTime(),
             })
         end
         if current and numberGT(current, 0) then
@@ -1647,7 +1668,7 @@ local function layoutEntries(entries)
         elseif HealingPriorityMouseDB.showCharges then
             local charges = getSafeCharges(entries[i].spellID)
             if charges and charges.unknown then
-                local cached = getCachedGlowState(entries[i].spellID)
+                local cached = getRecentChargeState(entries[i].spellID)
                 if cached and cached.current and cached.max and numberGT(cached.max, 1) then
                     f.chargeText:SetText(tostring(cached.current))
                     f.chargeText:Show()
@@ -2407,12 +2428,13 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then
             return
@@ -2439,6 +2461,24 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 
     if event == "UNIT_POWER_UPDATE" and arg1 ~= "player" then
         return
+    end
+
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
+        local castSpellID = plainNumber(arg3)
+        if castSpellID then
+            local cached = getRecentChargeState(castSpellID)
+            if cached and cached.current and cached.max and numberGT(cached.max, 1) then
+                local newCurrent = cached.current
+                if numberGT(newCurrent, 0) then
+                    newCurrent = newCurrent - 1
+                end
+                updateCachedGlowState(castSpellID, {
+                    current = newCurrent,
+                    max = cached.max,
+                    chargeTime = getNowTime(),
+                })
+            end
+        end
     end
 
     if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
