@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.8] - 2026-03-22
+
+### Added
+- Added Restoration Shaman `Healing Stream Totem` support to tracked/core spell logic and spell audit output.
+- Added active-totem detection so `Healing Stream Totem` is recommended when ready but not already active.
+
+### Fixed
+- Hardened Discipline combat visibility so core entries do not collapse unexpectedly during combat state changes.
+- Updated Disc `Penance` and `Power Word: Radiance` readiness checks to use charge-aware availability.
+
 ## [1.0.14-beta.7] - 2026-03-22
 
 ### Fixed

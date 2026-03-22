@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.7"
+local ADDON_VERSION = "1.0.14-beta.8"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -104,6 +104,7 @@ local SPELLS = {
     StrengthOfTheBlackOx = { 443112 },
 
     WaterShield = { 52127, 79949, 36816, 52128, 79950, 127939, 173164, 235976, 289211, 412686, 412687 },
+    HealingStreamTotem = { 5394, 392915, 392916 },
     HealingRain = { 73920 },
     Riptide = { 61295 },
     -- Cloudburst Totem (157153) was removed in patch 12.0.0.
@@ -262,6 +263,39 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
         return false
     end
+    return false
+end
+
+local function isPlayerTotemActive(spellID)
+    if not spellID or not GetTotemInfo then
+        return false
+    end
+
+    local spellName = getSpellName(spellID)
+    if not spellName or spellName == "" then
+        return false
+    end
+
+    local now = 0
+    if GetTime then
+        local okNow, nowValue = pcall(GetTime)
+        if okNow and type(nowValue) == "number" then
+            now = nowValue
+        end
+    end
+
+    for slot = 1, 4 do
+        local ok, haveTotem, totemName, startTime, duration = pcall(GetTotemInfo, slot)
+        if ok and haveTotem and totemName == spellName then
+            local startN = tonumber(startTime) or 0
+            local durationN = tonumber(duration) or 0
+            if durationN > 0 and (startN + durationN) > now then
+                return true
+            end
+            return true
+        end
+    end
+
     return false
 end
 
@@ -520,7 +554,7 @@ local CLASS_SPELL_KEYS = {
     DRUID = { "Lifebloom", "CenarionWard" },
     PALADIN = { "Consecration", "HolyBulwark" },
     MONK = { "RenewingMist", "StrengthOfTheBlackOx" },
-    SHAMAN = { "WaterShield", "HealingRain", "Riptide", "CloudburstTotem" },
+    SHAMAN = { "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem" },
     EVOKER = { "Reversion", "Echo", "Lifespark" },
     PRIEST = { "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
 }
@@ -559,6 +593,7 @@ local SPEC_CUSTOM_SPELL_IDS = {
         322101, -- Invoke Yu'lon
     },
     [264] = { -- Restoration Shaman
+        5394,   -- Healing Stream Totem
         61295,  -- Riptide
         73920,  -- Healing Rain
         1064,   -- Chain Heal
@@ -597,7 +632,7 @@ local CORE_SPELL_KEYS_BY_SPEC = {
     [105] = { "Lifebloom", "CenarionWard" },
     [65] = { "Consecration", "InfusionOfLight", "HolyBulwark" },
     [270] = { "RenewingMist", "StrengthOfTheBlackOx" },
-    [264] = { "WaterShield", "HealingRain", "Riptide", "CloudburstTotem" },
+    [264] = { "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem" },
     [1468] = { "Reversion", "Echo", "Lifespark" },
     [256] = { "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance" },
     [257] = { "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
@@ -1188,6 +1223,18 @@ local function isSpellAtMaxCharges(spellID)
         and numberGE(current, max)
 end
 
+local function hasAvailableChargeOrReady(spellID)
+    local charges = getSafeCharges(spellID)
+    if charges and not charges.unknown then
+        local current = charges.current
+        if current and numberGT(current, 0) then
+            return true
+        end
+        return false
+    end
+    return getCooldownReady(spellID)
+end
+
 local function buildEntries()
     local specID = getSpecID()
     if not specID then
@@ -1276,6 +1323,10 @@ local function buildEntries()
         if waterShieldID and not isAuraActive("player", waterShieldID, true, true) and getCooldownReady(waterShieldID) then
             addEntry("Water Shield", waterShieldID)
         end
+        local healingStreamTotemID = resolveSpellID("HealingStreamTotem")
+        if healingStreamTotemID and getCooldownReady(healingStreamTotemID) and not isPlayerTotemActive(healingStreamTotemID) then
+            addEntry("Healing Stream Totem", healingStreamTotemID)
+        end
         local healingRainID = resolveSpellID("HealingRain")
         if healingRainID and getCooldownReady(healingRainID) then
             addEntry("Healing Rain", healingRainID)
@@ -1315,23 +1366,38 @@ local function buildEntries()
     elseif specID == 256 then
         local atonementID = resolveSpellID("Atonement")
         local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
+        local discHasEntry = false
         if atonementID then
             addEntry("Atonement", atonementID, tostring(atonementCount))
+            discHasEntry = true
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
         if pwsID and getCooldownReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
             addEntry("Power Word: Shield", pwsID)
+            discHasEntry = true
         end
 
         local radianceID = resolveSpellID("PowerWordRadiance")
-        if radianceID and getCooldownReady(radianceID) then
+        if radianceID and hasAvailableChargeOrReady(radianceID) then
             addEntry("Power Word: Radiance", radianceID, nil, "PowerWordRadiance")
+            discHasEntry = true
         end
 
         local penanceID = resolveSpellID("Penance")
-        if penanceID and getCooldownReady(penanceID) then
+        if penanceID and hasAvailableChargeOrReady(penanceID) then
             addEntry("Penance", penanceID, nil, "Penance")
+            discHasEntry = true
+        end
+
+        if not discHasEntry and atonementID and not addedSpellIDs[atonementID] then
+            entries[#entries + 1] = {
+                name = "Atonement",
+                spellID = atonementID,
+                icon = getSpellTexture(atonementID) or 136243,
+                iconCount = tostring(atonementCount),
+            }
+            addedSpellIDs[atonementID] = true
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
@@ -2365,7 +2431,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             "Lifebloom", "CenarionWard",
             "Consecration", "ConsecrationAura", "InfusionOfLight", "HolyBulwark",
             "RenewingMist", "StrengthOfTheBlackOx",
-            "WaterShield", "HealingRain", "Riptide", "CloudburstTotem",
+            "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem",
             "Reversion", "Echo", "Lifespark",
             "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
         }
