@@ -835,19 +835,12 @@ local function shouldGlowEntry(entry)
                 current = current,
                 max = max,
             })
-        else
-            local cached = getCachedGlowState(entry.spellID)
-            if cached and cached.current and cached.max then
-                current = cached.current
-                max = cached.max
-                logGlowDecision(entry, false, charges and "charges-cached-unknown" or "charges-cached-missing")
-            elseif not charges then
-                logGlowDecision(entry, false, "charges-missing")
-                return false
-            elseif charges.unknown then
-                logGlowDecision(entry, false, "charges-unknown")
-                return false
-            end
+        elseif not charges then
+            logGlowDecision(entry, false, "charges-missing")
+            return false
+        elseif charges.unknown then
+            logGlowDecision(entry, false, "charges-unknown")
+            return false
         end
 
         if not (current and max and numberGT(max, 1)) then
@@ -1278,6 +1271,13 @@ local function hasAvailableChargeOrReady(spellID)
     local charges = getSafeCharges(spellID)
     if charges and not charges.unknown then
         local current = charges.current
+        local max = charges.max
+        if current and max then
+            updateCachedGlowState(spellID, {
+                current = current,
+                max = max,
+            })
+        end
         if current and numberGT(current, 0) then
             return true
         end
@@ -1471,7 +1471,8 @@ local function buildEntries()
     for _, customSpellID in ipairs(customSpells) do
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
-            and hasAvailableChargeOrReady(customSpellID) then
+            and hasAvailableChargeOrReady(customSpellID)
+            and isSpellUsableSafe(customSpellID) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
     end
@@ -1544,8 +1545,13 @@ local function layoutEntries(entries)
         elseif HealingPriorityMouseDB.showCharges then
             local charges = getSafeCharges(entries[i].spellID)
             if charges and charges.unknown then
-                f.chargeText:SetText("?")
-                f.chargeText:Show()
+                local cached = getCachedGlowState(entries[i].spellID)
+                if cached and cached.current and cached.max and numberGT(cached.max, 1) then
+                    f.chargeText:SetText(tostring(cached.current))
+                    f.chargeText:Show()
+                else
+                    f.chargeText:Hide()
+                end
             elseif charges and charges.max and numberGT(charges.max, 1) then
                 f.chargeText:SetText(tostring(charges.current or 0))
                 f.chargeText:Show()
