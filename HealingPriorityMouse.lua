@@ -988,6 +988,32 @@ local function getCooldownReady(spellID)
     return isSpellUsableSafe(spellID)
 end
 
+local function getCooldownReadyByTimer(spellID)
+    if not isSpellKnownSafe(spellID) then
+        return false
+    end
+
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if not ok or not info then
+            return getCooldownReady(spellID)
+        end
+        if isFalseFlag(info.isEnabled, false) then
+            return false
+        end
+        local duration = plainNumber(info.duration)
+        if duration and numberLE(duration, 0) then
+            return true
+        end
+        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+            return true
+        end
+        return false
+    end
+
+    return getCooldownReady(spellID)
+end
+
 local function getGroupUnits()
     local units = {}
     if IsInRaid() then
@@ -1232,7 +1258,7 @@ local function hasAvailableChargeOrReady(spellID)
         end
         return false
     end
-    return getCooldownReady(spellID)
+    return getCooldownReadyByTimer(spellID)
 end
 
 local function buildEntries()
@@ -1373,7 +1399,7 @@ local function buildEntries()
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
-        if pwsID and getCooldownReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
+        if pwsID and hasAvailableChargeOrReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
             discHasEntry = addEntry("Power Word: Shield", pwsID) or discHasEntry
         end
 
