@@ -945,6 +945,23 @@ local function isSpellUsableSafe(spellID)
     return false
 end
 
+local function isSpellResourceUsableSafe(spellID)
+    if not IsUsableSpell then
+        return true
+    end
+    local ok, usable, noMana = pcall(IsUsableSpell, spellID)
+    if not ok then
+        return true
+    end
+    if usable then
+        return true
+    end
+    if noMana then
+        return false
+    end
+    return true
+end
+
 local function isCooldownDurationReady(duration, isOnGCD)
     if duration and numberLE(duration, 0) then
         return true
@@ -1472,7 +1489,7 @@ local function buildEntries()
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
             and hasAvailableChargeOrReady(customSpellID)
-            and isSpellUsableSafe(customSpellID) then
+            and isSpellResourceUsableSafe(customSpellID) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
     end
@@ -1550,7 +1567,8 @@ local function layoutEntries(entries)
                     f.chargeText:SetText(tostring(cached.current))
                     f.chargeText:Show()
                 else
-                    f.chargeText:Hide()
+                    f.chargeText:SetText("?")
+                    f.chargeText:Show()
                 end
             elseif charges and charges.max and numberGT(charges.max, 1) then
                 f.chargeText:SetText(tostring(charges.current or 0))
