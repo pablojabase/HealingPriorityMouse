@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.5"
+local ADDON_VERSION = "1.0.14-beta.6"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -115,6 +115,8 @@ local SPELLS = {
 
     Atonement = { 194384 },
     PowerWordShield = { 17 },
+    PowerWordRadiance = { 194509 },
+    Penance = { 47540 },
     PrayerOfMending = { 33076 },
     Halo = { 120517 },
     Lightweaver = { 390993 },
@@ -126,6 +128,12 @@ local resolvedSpells = {}
 local GLOW_RULES = {
     RenewingMist = {
         mode = "chargesAtMax",
+    },
+    PowerWordRadiance = {
+        mode = "alwaysWhenShown",
+    },
+    Penance = {
+        mode = "alwaysWhenShown",
     },
     Lightweaver = {
         mode = "stackAtLeast",
@@ -591,7 +599,7 @@ local CORE_SPELL_KEYS_BY_SPEC = {
     [270] = { "RenewingMist", "StrengthOfTheBlackOx" },
     [264] = { "WaterShield", "HealingRain", "Riptide", "CloudburstTotem" },
     [1468] = { "Reversion", "Echo", "Lifespark" },
-    [256] = { "Atonement", "PowerWordShield" },
+    [256] = { "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance" },
     [257] = { "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
 }
 
@@ -818,6 +826,11 @@ local function shouldGlowEntry(entry)
         })
         logGlowDecision(entry, shouldGlow, shouldGlow and "charges-at-max" or "charges-below-max")
         return shouldGlow
+    end
+
+    if rule.mode == "alwaysWhenShown" then
+        logGlowDecision(entry, true, "always-when-shown")
+        return true
     end
 
     if rule.mode == "stackAtLeast" then
@@ -1309,6 +1322,16 @@ local function buildEntries()
         local pwsID = resolveSpellID("PowerWordShield")
         if pwsID and getCooldownReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
             addEntry("Power Word: Shield", pwsID)
+        end
+
+        local radianceID = resolveSpellID("PowerWordRadiance")
+        if radianceID and getCooldownReady(radianceID) then
+            addEntry("Power Word: Radiance", radianceID, nil, "PowerWordRadiance")
+        end
+
+        local penanceID = resolveSpellID("Penance")
+        if penanceID and getCooldownReady(penanceID) then
+            addEntry("Penance", penanceID, nil, "Penance")
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
@@ -2344,7 +2367,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             "RenewingMist", "StrengthOfTheBlackOx",
             "WaterShield", "HealingRain", "Riptide", "CloudburstTotem",
             "Reversion", "Echo", "Lifespark",
-            "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
+            "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
         }
         for _, key in ipairs(keys) do
             local spellID = resolveSpellID(key)

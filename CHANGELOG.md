@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.6] - 2026-03-22
+
+### Fixed
+- Added explicit Discipline Priest core tracking and glow-rule wiring for `Penance` and `Power Word: Radiance`.
+- Added `alwaysWhenShown` glow mode and applied it to Disc `Penance`/`Radiance` so glow behavior is consistent when those entries are active.
+- Extended `/hpm audit` spell reporting to include Disc `Penance` and `Power Word: Radiance` resolution.
+
 ## [1.0.14-beta.5] - 2026-03-22
 
 ### Changed
