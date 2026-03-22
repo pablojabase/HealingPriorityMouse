@@ -145,7 +145,7 @@ local GLOW_RULES = {
 
 local glowDebugState = {}
 local glowStateCache = {}
-local GLOW_CACHE_TTL = 2.0
+local GLOW_CACHE_TTL = 20.0
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 
@@ -868,8 +868,20 @@ local function shouldGlowEntry(entry)
             logGlowDecision(entry, false, "charges-missing")
             return false
         elseif charges.unknown then
-            logGlowDecision(entry, false, "charges-unknown")
-            return false
+            if InCombatLockdown and InCombatLockdown() then
+                local cached = getCachedGlowState(entry.spellID)
+                if cached and cached.current and cached.max then
+                    current = cached.current
+                    max = cached.max
+                    logGlowDecision(entry, false, "charges-unknown-use-cached")
+                else
+                    logGlowDecision(entry, false, "charges-unknown")
+                    return false
+                end
+            else
+                logGlowDecision(entry, false, "charges-unknown")
+                return false
+            end
         end
 
         if not (current and max and numberGT(max, 1)) then
@@ -1353,7 +1365,27 @@ local function hasAvailableChargeOrReadyStrict(spellID)
         end
         return false
     end
-    return getCooldownReadyByTimer(spellID, false)
+    local strictReady = getCooldownReadyByTimer(spellID, false)
+    if strictReady then
+        updateCachedGlowState(spellID, {
+            cooldownReady = true,
+        })
+        return true
+    end
+
+    local permissiveReady = getCooldownReadyByTimer(spellID, true)
+    if permissiveReady then
+        local cached = getCachedGlowState(spellID)
+        if cached and cached.cooldownReady ~= nil then
+            return cached.cooldownReady and true or false
+        end
+        return false
+    end
+
+    updateCachedGlowState(spellID, {
+        cooldownReady = false,
+    })
+    return false
 end
 
 local function buildEntries()
