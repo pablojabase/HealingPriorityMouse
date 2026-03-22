@@ -1261,13 +1261,13 @@ local function buildEntries()
 
     local function addEntry(name, spellID, iconCount, glowRule, glowContext)
         if not spellID then
-            return
+            return false
         end
         if not isSpellInTrackedList(spellID) then
-            return
+            return false
         end
         if addedSpellIDs[spellID] then
-            return
+            return false
         end
         entries[#entries + 1] = {
             name = name,
@@ -1278,6 +1278,7 @@ local function buildEntries()
             glowContext = glowContext,
         }
         addedSpellIDs[spellID] = true
+        return true
     end
 
     if specID == 105 then
@@ -1368,26 +1369,22 @@ local function buildEntries()
         local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
         local discHasEntry = false
         if atonementID then
-            addEntry("Atonement", atonementID, tostring(atonementCount))
-            discHasEntry = true
+            discHasEntry = addEntry("Atonement", atonementID, tostring(atonementCount)) or discHasEntry
         end
 
         local pwsID = resolveSpellID("PowerWordShield")
         if pwsID and getCooldownReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
-            addEntry("Power Word: Shield", pwsID)
-            discHasEntry = true
+            discHasEntry = addEntry("Power Word: Shield", pwsID) or discHasEntry
         end
 
         local radianceID = resolveSpellID("PowerWordRadiance")
         if radianceID and hasAvailableChargeOrReady(radianceID) then
-            addEntry("Power Word: Radiance", radianceID, nil, "PowerWordRadiance")
-            discHasEntry = true
+            discHasEntry = addEntry("Power Word: Radiance", radianceID, nil, "PowerWordRadiance") or discHasEntry
         end
 
         local penanceID = resolveSpellID("Penance")
         if penanceID and hasAvailableChargeOrReady(penanceID) then
-            addEntry("Penance", penanceID, nil, "Penance")
-            discHasEntry = true
+            discHasEntry = addEntry("Penance", penanceID, nil, "Penance") or discHasEntry
         end
 
         if not discHasEntry and atonementID and not addedSpellIDs[atonementID] then
