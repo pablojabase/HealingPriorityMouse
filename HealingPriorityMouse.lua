@@ -146,7 +146,7 @@ local GLOW_RULES = {
 local glowDebugState = {}
 local glowStateCache = {}
 local GLOW_CACHE_TTL = 20.0
-local CHARGE_CACHE_TTL = 3.0
+local CHARGE_CACHE_TTL = 12.0
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 
@@ -1075,17 +1075,18 @@ local function getCooldownReadyByTimer(spellID, failOpen)
         end
         if info then
             if isFalseFlag(info.isEnabled, false) then
-                return allowFailOpen
-            end
-            local duration = plainNumber(info.duration)
-            if duration and numberLE(duration, 0) then
-                return true
-            end
-            if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
-                return true
-            end
-            if duration and numberGT(duration, 0) then
-                return false
+                info = nil
+            else
+                local duration = plainNumber(info.duration)
+                if duration and numberLE(duration, 0) then
+                    return true
+                end
+                if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+                    return true
+                end
+                if duration and numberGT(duration, 0) then
+                    return false
+                end
             end
         end
     end
@@ -1674,8 +1675,14 @@ local function layoutEntries(entries)
                     f.chargeText:Show()
                 else
                     if InCombatLockdown and InCombatLockdown() then
-                        f.chargeText:SetText("?")
-                        f.chargeText:Show()
+                        local staleCached = getCachedGlowState(entries[i].spellID)
+                        if staleCached and staleCached.current and staleCached.max and numberGT(staleCached.max, 1) then
+                            f.chargeText:SetText(tostring(staleCached.current))
+                            f.chargeText:Show()
+                        else
+                            f.chargeText:SetText("?")
+                            f.chargeText:Show()
+                        end
                     else
                         f.chargeText:Hide()
                     end
