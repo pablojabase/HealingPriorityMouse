@@ -996,22 +996,47 @@ local function getCooldownReadyByTimer(spellID)
     if C_Spell and C_Spell.GetSpellCooldown then
         local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
         if not ok or not info then
-            return getCooldownReady(spellID)
+            info = nil
         end
-        if isFalseFlag(info.isEnabled, false) then
-            return false
+        if info then
+            if isFalseFlag(info.isEnabled, false) then
+                return false
+            end
+            local duration = plainNumber(info.duration)
+            if duration and numberLE(duration, 0) then
+                return true
+            end
+            if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+                return true
+            end
+            if duration and numberGT(duration, 0) then
+                return false
+            end
         end
-        local duration = plainNumber(info.duration)
-        if duration and numberLE(duration, 0) then
-            return true
-        end
-        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
-            return true
-        end
-        return false
     end
 
-    return getCooldownReady(spellID)
+    if GetSpellCooldown then
+        local okLegacy, startTime, duration, enabled = pcall(GetSpellCooldown, spellID)
+        if okLegacy then
+            local startN = plainNumber(startTime)
+            local durationN = plainNumber(duration)
+            if enabled == 0 then
+                return false
+            end
+            if durationN and numberLE(durationN, 0) then
+                return true
+            end
+            if startN and durationN and numberGT(durationN, 0) then
+                local now = getNowTime()
+                if numberLE((startN + durationN), now + 0.05) then
+                    return true
+                end
+                return false
+            end
+        end
+    end
+
+    return true
 end
 
 local function getGroupUnits()
