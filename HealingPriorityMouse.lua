@@ -407,6 +407,20 @@ end
 
 local function getSafeCharges(spellID)
     if not (C_Spell and C_Spell.GetSpellCharges) then
+        if GetSpellCharges then
+            local okLegacy, currentLegacy, maxLegacy = pcall(GetSpellCharges, spellID)
+            if okLegacy then
+                local currentLegacyN = plainNumber(currentLegacy)
+                local maxLegacyN = plainNumber(maxLegacy)
+                if currentLegacyN and maxLegacyN then
+                    return {
+                        current = currentLegacyN,
+                        max = maxLegacyN,
+                        unknown = false,
+                    }
+                end
+            end
+        end
         return nil
     end
 
@@ -424,6 +438,21 @@ local function getSafeCharges(spellID)
             max = max,
             unknown = false,
         }
+    end
+
+    if GetSpellCharges then
+        local okLegacy, currentLegacy, maxLegacy = pcall(GetSpellCharges, spellID)
+        if okLegacy then
+            local currentLegacyN = plainNumber(currentLegacy)
+            local maxLegacyN = plainNumber(maxLegacy)
+            if currentLegacyN and maxLegacyN then
+                return {
+                    current = currentLegacyN,
+                    max = maxLegacyN,
+                    unknown = false,
+                }
+            end
+        end
     end
 
     if not isNilValue(charges.currentCharges) or not isNilValue(charges.maxCharges) then
@@ -998,9 +1027,14 @@ local function getCooldownReady(spellID)
     return isSpellUsableSafe(spellID)
 end
 
-local function getCooldownReadyByTimer(spellID)
+local function getCooldownReadyByTimer(spellID, failOpen)
     if not isSpellKnownSafe(spellID) then
         return false
+    end
+
+    local allowFailOpen = true
+    if failOpen == false then
+        allowFailOpen = false
     end
 
     if C_Spell and C_Spell.GetSpellCooldown then
@@ -1046,7 +1080,7 @@ local function getCooldownReadyByTimer(spellID)
         end
     end
 
-    return true
+    return allowFailOpen
 end
 
 local function getGroupUnits()
@@ -1300,7 +1334,26 @@ local function hasAvailableChargeOrReady(spellID)
         end
         return false
     end
-    return getCooldownReadyByTimer(spellID)
+    return getCooldownReadyByTimer(spellID, true)
+end
+
+local function hasAvailableChargeOrReadyStrict(spellID)
+    local charges = getSafeCharges(spellID)
+    if charges and not charges.unknown then
+        local current = charges.current
+        local max = charges.max
+        if current and max then
+            updateCachedGlowState(spellID, {
+                current = current,
+                max = max,
+            })
+        end
+        if current and numberGT(current, 0) then
+            return true
+        end
+        return false
+    end
+    return getCooldownReadyByTimer(spellID, false)
 end
 
 local function buildEntries()
@@ -1488,7 +1541,7 @@ local function buildEntries()
     for _, customSpellID in ipairs(customSpells) do
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
-            and hasAvailableChargeOrReady(customSpellID)
+            and hasAvailableChargeOrReadyStrict(customSpellID)
             and isSpellResourceUsableSafe(customSpellID) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
@@ -1567,8 +1620,12 @@ local function layoutEntries(entries)
                     f.chargeText:SetText(tostring(cached.current))
                     f.chargeText:Show()
                 else
-                    f.chargeText:SetText("?")
-                    f.chargeText:Show()
+                    if InCombatLockdown and InCombatLockdown() then
+                        f.chargeText:SetText("?")
+                        f.chargeText:Show()
+                    else
+                        f.chargeText:Hide()
+                    end
                 end
             elseif charges and charges.max and numberGT(charges.max, 1) then
                 f.chargeText:SetText(tostring(charges.current or 0))
