@@ -145,10 +145,11 @@ local GLOW_RULES = {
 
 local glowDebugState = {}
 local glowStateCache = {}
-local GLOW_CACHE_TTL = 20.0
+local GLOW_CACHE_TTL = 120.0
 local CHARGE_CACHE_TTL = 12.0
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
+local updateCachedGlowState
 
 local function getNowTime()
     if GetTime then
@@ -189,7 +190,73 @@ local function getRecentChargeState(spellID)
     return state
 end
 
-local function updateCachedGlowState(spellID, patch)
+local function estimateChargeStateFromCache(spellID)
+    local state = getRecentChargeState(spellID)
+    if not state then
+        return nil
+    end
+
+    local current = state.current
+    local max = state.max
+    if not (current and max and numberGT(max, 1)) then
+        return state
+    end
+
+    local rechargeStart = state.rechargeStart
+    local rechargeDuration = state.rechargeDuration
+    if not (rechargeStart and rechargeDuration and numberGT(rechargeDuration, 0)) then
+        return state
+    end
+
+    local now = getNowTime()
+    if numberLE(now, rechargeStart) then
+        return state
+    end
+
+    local elapsed = now - rechargeStart
+    local gainedCharges = math.floor(elapsed / rechargeDuration)
+    if gainedCharges <= 0 then
+        return state
+    end
+
+    local newCurrent = math.min(max, current + gainedCharges)
+    local patch = {
+        current = newCurrent,
+        max = max,
+        chargeTime = now,
+    }
+
+    if newCurrent < max then
+        patch.rechargeStart = rechargeStart + (gainedCharges * rechargeDuration)
+        patch.rechargeDuration = rechargeDuration
+    else
+        patch.rechargeStart = nil
+        patch.rechargeDuration = nil
+    end
+
+    updateCachedGlowState(spellID, patch)
+    return getRecentChargeState(spellID)
+end
+
+local function cacheChargeState(spellID, chargeState)
+    if not spellID or not chargeState then
+        return
+    end
+    local current = chargeState.current
+    local max = chargeState.max
+    if not (current and max) then
+        return
+    end
+    updateCachedGlowState(spellID, {
+        current = current,
+        max = max,
+        rechargeStart = chargeState.rechargeStart,
+        rechargeDuration = chargeState.rechargeDuration,
+        chargeTime = getNowTime(),
+    })
+end
+
+updateCachedGlowState = function(spellID, patch)
     if not spellID then
         return
     end
@@ -426,14 +493,18 @@ end
 local function getSafeCharges(spellID)
     if not (C_Spell and C_Spell.GetSpellCharges) then
         if GetSpellCharges then
-            local okLegacy, currentLegacy, maxLegacy = pcall(GetSpellCharges, spellID)
+            local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy = pcall(GetSpellCharges, spellID)
             if okLegacy then
                 local currentLegacyN = plainNumber(currentLegacy)
                 local maxLegacyN = plainNumber(maxLegacy)
+                local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
+                local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
                 if currentLegacyN and maxLegacyN then
                     return {
                         current = currentLegacyN,
                         max = maxLegacyN,
+                        rechargeStart = cooldownStartLegacyN,
+                        rechargeDuration = cooldownDurationLegacyN,
                         unknown = false,
                     }
                 end
@@ -449,24 +520,32 @@ local function getSafeCharges(spellID)
 
     local current = plainNumber(charges.currentCharges)
     local max = plainNumber(charges.maxCharges)
+    local cooldownStart = plainNumber(charges.cooldownStartTime)
+    local cooldownDuration = plainNumber(charges.cooldownDuration)
 
     if current and max then
         return {
             current = current,
             max = max,
+            rechargeStart = cooldownStart,
+            rechargeDuration = cooldownDuration,
             unknown = false,
         }
     end
 
     if GetSpellCharges then
-        local okLegacy, currentLegacy, maxLegacy = pcall(GetSpellCharges, spellID)
+        local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy = pcall(GetSpellCharges, spellID)
         if okLegacy then
             local currentLegacyN = plainNumber(currentLegacy)
             local maxLegacyN = plainNumber(maxLegacy)
+            local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
+            local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
             if currentLegacyN and maxLegacyN then
                 return {
                     current = currentLegacyN,
                     max = maxLegacyN,
+                    rechargeStart = cooldownStartLegacyN,
+                    rechargeDuration = cooldownDurationLegacyN,
                     unknown = false,
                 }
             end
@@ -878,17 +957,13 @@ local function shouldGlowEntry(entry)
         local max = charges and charges.max
 
         if charges and not charges.unknown and current and max then
-            updateCachedGlowState(entry.spellID, {
-                current = current,
-                max = max,
-                chargeTime = getNowTime(),
-            })
+            cacheChargeState(entry.spellID, charges)
         elseif not charges then
             logGlowDecision(entry, false, "charges-missing")
             return false
         elseif charges.unknown then
             if InCombatLockdown and InCombatLockdown() then
-                local cached = getRecentChargeState(entry.spellID)
+                local cached = estimateChargeStateFromCache(entry.spellID)
                 if cached and cached.current and cached.max then
                     current = cached.current
                     max = cached.max
@@ -1097,7 +1172,7 @@ local function getCooldownReadyByTimer(spellID, failOpen)
             local startN = plainNumber(startTime)
             local durationN = plainNumber(duration)
             if enabled == 0 then
-                return false
+                return allowFailOpen
             end
             if durationN and numberLE(durationN, 0) then
                 return true
@@ -1356,11 +1431,7 @@ local function hasAvailableChargeOrReady(spellID)
         local current = charges.current
         local max = charges.max
         if current and max then
-            updateCachedGlowState(spellID, {
-                current = current,
-                max = max,
-                chargeTime = getNowTime(),
-            })
+            cacheChargeState(spellID, charges)
         end
         if current and numberGT(current, 0) then
             return true
@@ -1376,11 +1447,7 @@ local function hasAvailableChargeOrReadyStrict(spellID)
         local current = charges.current
         local max = charges.max
         if current and max then
-            updateCachedGlowState(spellID, {
-                current = current,
-                max = max,
-                chargeTime = getNowTime(),
-            })
+            cacheChargeState(spellID, charges)
         end
         if current and numberGT(current, 0) then
             return true
@@ -1669,7 +1736,7 @@ local function layoutEntries(entries)
         elseif HealingPriorityMouseDB.showCharges then
             local charges = getSafeCharges(entries[i].spellID)
             if charges and charges.unknown then
-                local cached = getRecentChargeState(entries[i].spellID)
+                local cached = estimateChargeStateFromCache(entries[i].spellID)
                 if cached and cached.current and cached.max and numberGT(cached.max, 1) then
                     f.chargeText:SetText(tostring(cached.current))
                     f.chargeText:Show()
@@ -2473,17 +2540,25 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
         local castSpellID = plainNumber(arg3)
         if castSpellID then
-            local cached = getRecentChargeState(castSpellID)
+            local cached = estimateChargeStateFromCache(castSpellID)
             if cached and cached.current and cached.max and numberGT(cached.max, 1) then
                 local newCurrent = cached.current
                 if numberGT(newCurrent, 0) then
                     newCurrent = newCurrent - 1
                 end
-                updateCachedGlowState(castSpellID, {
+                local patch = {
                     current = newCurrent,
                     max = cached.max,
                     chargeTime = getNowTime(),
-                })
+                }
+                if newCurrent < cached.max then
+                    patch.rechargeDuration = cached.rechargeDuration
+                    patch.rechargeStart = getNowTime()
+                else
+                    patch.rechargeStart = nil
+                    patch.rechargeDuration = nil
+                end
+                updateCachedGlowState(castSpellID, patch)
             end
         end
     end
