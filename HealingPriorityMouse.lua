@@ -1439,18 +1439,67 @@ local function isSpellAtMaxCharges(spellID)
         and numberGE(current, max)
 end
 
+local LIFE_COCOON_SPELL_ID = 116849
+
+local function isRenewingMistReady(spellID)
+    local charges = getSafeCharges(spellID)
+    if charges and not charges.unknown then
+        local current = charges.current
+        local max = charges.max
+        if current and max and numberGT(max, 1) then
+            cacheChargeState(spellID, charges)
+            return numberGT(current, 0)
+        end
+    end
+
+    local cached = estimateChargeStateFromCache(spellID)
+    if cached and cached.current and cached.max and numberGT(cached.max, 1) then
+        return numberGT(cached.current, 0)
+    end
+
+    return getCooldownReadyByTimer(spellID, true)
+end
+
+local function isLifeCocoonSpell(spellID)
+    return spellID == LIFE_COCOON_SPELL_ID
+end
+
+local function isLifeCocoonReady(spellID)
+    local strictReady = getCooldownReadyByTimer(spellID, false)
+    if strictReady then
+        updateCachedGlowState(spellID, {
+            cooldownReady = true,
+        })
+        return true
+    end
+
+    local permissiveReady = getCooldownReadyByTimer(spellID, true)
+    if permissiveReady then
+        local cached = getCachedGlowState(spellID)
+        if cached and cached.cooldownReady ~= nil then
+            return cached.cooldownReady and true or false
+        end
+        return true
+    end
+
+    updateCachedGlowState(spellID, {
+        cooldownReady = false,
+    })
+    return false
+end
+
 local function hasAvailableChargeOrReady(spellID)
     local charges = getSafeCharges(spellID)
     if charges and not charges.unknown then
         local current = charges.current
         local max = charges.max
-        if current and max then
+        if current and max and numberGT(max, 1) then
             cacheChargeState(spellID, charges)
+            if numberGT(current, 0) then
+                return true
+            end
+            return false
         end
-        if current and numberGT(current, 0) then
-            return true
-        end
-        return false
     end
     return getCooldownReadyByTimer(spellID, true)
 end
@@ -1460,13 +1509,13 @@ local function hasAvailableChargeOrReadyStrict(spellID)
     if charges and not charges.unknown then
         local current = charges.current
         local max = charges.max
-        if current and max then
+        if current and max and numberGT(max, 1) then
             cacheChargeState(spellID, charges)
+            if numberGT(current, 0) then
+                return true
+            end
+            return false
         end
-        if current and numberGT(current, 0) then
-            return true
-        end
-        return false
     end
     local strictReady = getCooldownReadyByTimer(spellID, false)
     if strictReady then
@@ -1567,7 +1616,7 @@ local function buildEntries()
         end
     elseif specID == 270 then
         local renewingMistID = resolveSpellID("RenewingMist")
-        if renewingMistID and hasAvailableChargeOrReady(renewingMistID)
+        if renewingMistID and isRenewingMistReady(renewingMistID)
             and (isSpellAtMaxCharges(renewingMistID) or isAuraMissingOnMouseover(renewingMistID)) then
             addEntry("Renewing Mist", renewingMistID, nil, "RenewingMist")
         end
@@ -1674,9 +1723,13 @@ local function buildEntries()
 
     local customSpells = getCustomTrackedSpells()
     for _, customSpellID in ipairs(customSpells) do
+        local readyForCustomSpell = hasAvailableChargeOrReadyStrict(customSpellID)
+        if isLifeCocoonSpell(customSpellID) then
+            readyForCustomSpell = isLifeCocoonReady(customSpellID)
+        end
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
-            and hasAvailableChargeOrReadyStrict(customSpellID)
+            and readyForCustomSpell
             and isSpellResourceUsableSafe(customSpellID) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
