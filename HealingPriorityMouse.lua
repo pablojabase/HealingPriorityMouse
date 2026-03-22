@@ -196,20 +196,34 @@ local function estimateChargeStateFromCache(spellID)
         return nil
     end
 
+    local function gt(left, right)
+        local ok, result = pcall(function()
+            return left > right
+        end)
+        return ok and result or false
+    end
+
+    local function le(left, right)
+        local ok, result = pcall(function()
+            return left <= right
+        end)
+        return ok and result or false
+    end
+
     local current = state.current
     local max = state.max
-    if not (current and max and numberGT(max, 1)) then
+    if not (current and max and gt(max, 1)) then
         return state
     end
 
     local rechargeStart = state.rechargeStart
     local rechargeDuration = state.rechargeDuration
-    if not (rechargeStart and rechargeDuration and numberGT(rechargeDuration, 0)) then
+    if not (rechargeStart and rechargeDuration and gt(rechargeDuration, 0)) then
         return state
     end
 
     local now = getNowTime()
-    if numberLE(now, rechargeStart) then
+    if le(now, rechargeStart) then
         return state
     end
 
