@@ -1465,26 +1465,54 @@ local function isLifeCocoonSpell(spellID)
 end
 
 local function isLifeCocoonReady(spellID)
-    local strictReady = getCooldownReadyByTimer(spellID, false)
-    if strictReady then
-        updateCachedGlowState(spellID, {
-            cooldownReady = true,
-        })
-        return true
-    end
+    local determinedReady = nil
 
-    local permissiveReady = getCooldownReadyByTimer(spellID, true)
-    if permissiveReady then
-        local cached = getCachedGlowState(spellID)
-        if cached and cached.cooldownReady ~= nil then
-            return cached.cooldownReady and true or false
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if ok and info then
+            local duration = plainNumber(info.duration)
+            if duration then
+                if numberLE(duration, 0) then
+                    determinedReady = true
+                elseif isTrueFlag(info.isOnGCD, false) and numberLE(duration, 1.7) then
+                    determinedReady = true
+                elseif numberGT(duration, 0) then
+                    determinedReady = false
+                end
+            end
         end
-        return true
     end
 
-    updateCachedGlowState(spellID, {
-        cooldownReady = false,
-    })
+    if determinedReady == nil and GetSpellCooldown then
+        local okLegacy, startTime, duration = pcall(GetSpellCooldown, spellID)
+        if okLegacy then
+            local startN = plainNumber(startTime)
+            local durationN = plainNumber(duration)
+            if durationN and numberLE(durationN, 0) then
+                determinedReady = true
+            elseif startN and durationN and numberGT(durationN, 0) then
+                local now = getNowTime()
+                if numberLE((startN + durationN), now + 0.05) then
+                    determinedReady = true
+                else
+                    determinedReady = false
+                end
+            end
+        end
+    end
+
+    if determinedReady ~= nil then
+        updateCachedGlowState(spellID, {
+            cooldownReady = determinedReady,
+        })
+        return determinedReady
+    end
+
+    local cached = getCachedGlowState(spellID)
+    if cached and cached.cooldownReady ~= nil then
+        return cached.cooldownReady and true or false
+    end
+
     return false
 end
 

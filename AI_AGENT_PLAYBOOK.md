@@ -40,6 +40,9 @@ Use this file as the single source of truth when onboarding a new AI coding agen
    - keep `README.md` command list accurate.
    - version bump must match release intent.
 
+5. **Regression containment first**
+   - when a spell has repeated API edge-case regressions, isolate it into spell-specific readiness logic instead of repeatedly changing shared helpers.
+
 ## 4) Established Behavioral Decisions
 
 These are intentional and should not be changed accidentally:
@@ -66,6 +69,13 @@ Release timing policy (strict):
 - During active feature work, do **not** bump version, do **not** push, and do **not** tag.
 - Batch feature work first; wait for user confirmation that work is complete.
 - Only at the very end, after a concise feature summary, apply version/changelog/release actions when the user explicitly says to proceed.
+
+Current collaboration preference (highest priority over generic policy):
+
+- User frequently asks for immediate `master` pushes after each validated fix.
+- User frequently asks: **"push no tags"**.
+- When user says push/no tags, commit and push `master` only; do not create or push tags.
+- Keep commit messages semantic and concise.
 
 When making a release-ready change:
 
@@ -95,6 +105,50 @@ When making a release-ready change:
 5. Update docs/changelog/version when applicable.
 6. Report exactly what changed and where.
 7. Do not push, tag, or bump version unless user explicitly requests final release execution.
+
+## 11) Current Hotspots (March 2026)
+
+### Renewing Mist (Mistweaver)
+
+- Symptom history:
+   - disappearing in combat,
+   - `?` charge display in combat,
+   - stale charge values not regenerating to max in combat.
+- Current approach:
+   - dedicated `isRenewingMistReady` path,
+   - charge cache with recharge timing (`rechargeStart`, `rechargeDuration`),
+   - cache estimation during unknown payloads.
+- Guardrail:
+   - avoid touching this path unless user reports new RM-specific regressions.
+
+### Life Cocoon (custom tracked spell)
+
+- Symptom history:
+   - disappearing in combat,
+   - then disappearing in/out of combat,
+   - then permanently displayed.
+- Current approach:
+   - dedicated `isLifeCocoonReady` path,
+   - deterministic cooldown evaluation first,
+   - cached last-known fallback only when cooldown payload is indeterminate.
+- Guardrail:
+   - do not route Cocoon through generic permissive fail-open readiness.
+
+### Shared-helper policy after repeated regressions
+
+- Keep shared helpers generic and stable for most spells.
+- Isolate exceptional spells with dedicated helpers (policy/override style).
+- Prefer adding a narrow spell override over changing global readiness semantics.
+
+## 12) Handoff Notes for New AI Sessions
+
+- First read: `AI_AGENT_PLAYBOOK.md`, then `HealingPriorityMouse.lua` around readiness helpers and custom spell loop.
+- Respect user preference to push quickly with **no tags** when requested.
+- If a fix touches readiness helpers, explicitly state blast radius (shared vs spell-specific).
+- For combat regressions, validate in this order:
+   1. out-of-combat baseline not regressed,
+   2. combat entry behavior,
+   3. cooldown/charge transitions under spend+recharge.
 
 ## 9) Bootstrap Prompt for New Conversations
 
