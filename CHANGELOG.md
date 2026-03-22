@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.3] - 2026-03-22
+
+### Fixed
+- Switched icon glow rendering to Blizzard's native overlay glow API with compatibility fallback.
+- Prevented partial/clipped glow visuals by improving glow show/hide lifecycle handling.
+
 ## [1.0.14-beta.2] - 2026-03-22
 
 ### Added

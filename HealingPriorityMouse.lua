@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.2"
+local ADDON_VERSION = "1.0.14-beta.3"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -1057,6 +1057,7 @@ local function ensureIcon(index)
     local frame = CreateFrame("Frame", nil, root, "BackdropTemplate")
     frame:SetSize(26, 26)
     frame:SetBackdrop(nil)
+    frame:SetClipsChildren(false)
 
     local tex = frame:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
@@ -1110,6 +1111,9 @@ end
 
 local function hideAllIcons()
     for _, frame in ipairs(iconFrames) do
+        if ActionButton_HideOverlayGlow then
+            ActionButton_HideOverlayGlow(frame)
+        end
         if frame.glowAnim and frame.glowAnim:IsPlaying() then
             frame.glowAnim:Stop()
         end
@@ -1130,6 +1134,10 @@ local function setIconGlow(frame, enabled)
     end
     frame.glowEnabled = enabled
     if enabled then
+        if ActionButton_ShowOverlayGlow then
+            ActionButton_ShowOverlayGlow(frame)
+            return
+        end
         if frame.glow then
             frame.glow:Show()
         end
@@ -1137,6 +1145,10 @@ local function setIconGlow(frame, enabled)
             frame.glowAnim:Play()
         end
         return
+    end
+
+    if ActionButton_HideOverlayGlow then
+        ActionButton_HideOverlayGlow(frame)
     end
 
     if frame.glowAnim and frame.glowAnim:IsPlaying() then
