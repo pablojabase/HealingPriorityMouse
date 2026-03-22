@@ -1289,7 +1289,7 @@ local function buildEntries()
         if not spellID then
             return false
         end
-        if not isSpellInTrackedList(spellID) then
+        if (not isHandledByCoreSpecLogic(spellID)) and (not isSpellInTrackedList(spellID)) then
             return false
         end
         if addedSpellIDs[spellID] then
