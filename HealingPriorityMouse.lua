@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.14-beta.4"
+local ADDON_VERSION = "1.0.14-beta.5"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -1082,13 +1082,13 @@ local function ensureIcon(index)
     chargeText:SetTextColor(1, 1, 1, 1)
     frame.chargeText = chargeText
 
-    local glow = frame:CreateTexture(nil, "OVERLAY")
+    local glow = frame:CreateTexture(nil, "OVERLAY", nil, 7)
     glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     glow:SetBlendMode("ADD")
     glow:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    glow:SetSize(42, 42)
-    glow:SetVertexColor(1.0, 0.85, 0.25, 1.0)
-    glow:SetAlpha(0.9)
+    glow:SetSize(58, 58)
+    glow:SetVertexColor(1.0, 0.95, 0.35, 1.0)
+    glow:SetAlpha(1.0)
     glow:Hide()
     frame.glow = glow
 
@@ -1096,13 +1096,13 @@ local function ensureIcon(index)
     local fadeIn = glowAnim:CreateAnimation("Alpha")
     fadeIn:SetOrder(1)
     fadeIn:SetDuration(0.45)
-    fadeIn:SetFromAlpha(0.4)
+    fadeIn:SetFromAlpha(0.7)
     fadeIn:SetToAlpha(1.0)
     local fadeOut = glowAnim:CreateAnimation("Alpha")
     fadeOut:SetOrder(2)
     fadeOut:SetDuration(0.45)
     fadeOut:SetFromAlpha(1.0)
-    fadeOut:SetToAlpha(0.4)
+    fadeOut:SetToAlpha(0.7)
     glowAnim:SetLooping("REPEAT")
     frame.glowAnim = glowAnim
 

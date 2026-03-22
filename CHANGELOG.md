@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14-beta.5] - 2026-03-22
+
+### Changed
+- Tuned glow visuals to sit further outside the icon bounds for clearer edge separation.
+- Increased glow brightness and pulse floor so highlights stay more visible in combat.
+
 ## [1.0.14-beta.4] - 2026-03-22
 
 ### Fixed
