@@ -1340,14 +1340,14 @@ local function buildEntries()
             addEntry("Lifebloom", lifebloomID)
         end
         local cenWardID = resolveSpellID("CenarionWard")
-        if mouseover and cenWardID and getCooldownReady(cenWardID)
+        if mouseover and cenWardID and getCooldownReadyByTimer(cenWardID)
             and not isAuraActive(mouseover, cenWardID, true, true) then
             addEntry("Cenarion Ward", cenWardID)
         end
     elseif specID == 65 then
         local consecrationID = resolveSpellID("Consecration")
         local consecrationAuraID = resolveSpellID("ConsecrationAura")
-        if consecrationID and getCooldownReady(consecrationID)
+        if consecrationID and getCooldownReadyByTimer(consecrationID)
             and (not consecrationAuraID or not isAuraActive("player", consecrationAuraID, true, true)) then
             addEntry("Consecration", consecrationID)
         end
@@ -1356,7 +1356,7 @@ local function buildEntries()
             addEntry("Infusion of Light", infusionID)
         end
         local holyBulwarkID = resolveSpellID("HolyBulwark")
-        if holyBulwarkID and getCooldownReady(holyBulwarkID)
+        if holyBulwarkID and getCooldownReadyByTimer(holyBulwarkID)
             and not isAuraActive("player", holyBulwarkID, true, true) then
             addEntry("Holy Bulwark", holyBulwarkID)
         end
@@ -1372,15 +1372,15 @@ local function buildEntries()
         end
     elseif specID == 264 then
         local waterShieldID = resolveSpellID("WaterShield")
-        if waterShieldID and not isAuraActive("player", waterShieldID, true, true) and getCooldownReady(waterShieldID) then
+        if waterShieldID and not isAuraActive("player", waterShieldID, true, true) and getCooldownReadyByTimer(waterShieldID) then
             addEntry("Water Shield", waterShieldID)
         end
         local healingStreamTotemID = resolveSpellID("HealingStreamTotem")
-        if healingStreamTotemID and getCooldownReady(healingStreamTotemID) and not isPlayerTotemActive(healingStreamTotemID) then
+        if healingStreamTotemID and getCooldownReadyByTimer(healingStreamTotemID) and not isPlayerTotemActive(healingStreamTotemID) then
             addEntry("Healing Stream Totem", healingStreamTotemID)
         end
         local healingRainID = resolveSpellID("HealingRain")
-        if healingRainID and getCooldownReady(healingRainID) then
+        if healingRainID and getCooldownReadyByTimer(healingRainID) then
             addEntry("Healing Rain", healingRainID)
         end
         local riptideID = resolveSpellID("Riptide")
@@ -1389,7 +1389,7 @@ local function buildEntries()
             addEntry("Riptide", riptideID)
         end
         local cloudburstID = resolveSpellID("CloudburstTotem")
-        if cloudburstID and getCooldownReady(cloudburstID) then
+        if cloudburstID and getCooldownReadyByTimer(cloudburstID) then
             addEntry("Cloudburst Totem", cloudburstID)
         end
     elseif specID == 1468 then
@@ -1408,7 +1408,7 @@ local function buildEntries()
             end
         end
         local echoID = resolveSpellID("Echo")
-        if echoID and getCooldownReady(echoID) and getEssenceCount() >= 2 then
+        if echoID and getCooldownReadyByTimer(echoID) and getEssenceCount() >= 2 then
             addEntry("Echo", echoID)
         end
         local lifesparkID = resolveSpellID("Lifespark")
@@ -1449,11 +1449,11 @@ local function buildEntries()
         end
     elseif specID == 257 then
         local pomID = resolveSpellID("PrayerOfMending")
-        if pomID and getCooldownReady(pomID) and isAuraMissingOnMouseover(pomID) then
+        if pomID and getCooldownReadyByTimer(pomID) and isAuraMissingOnMouseover(pomID) then
             addEntry("Prayer of Mending", pomID)
         end
         local haloID = resolveSpellID("Halo")
-        if haloID and getCooldownReady(haloID) then
+        if haloID and getCooldownReadyByTimer(haloID) then
             addEntry("Halo", haloID)
         end
         local lightweaverID = resolveSpellID("Lightweaver")
@@ -1462,7 +1462,7 @@ local function buildEntries()
             addEntry("Lightweaver", lightweaverID, nil, "Lightweaver", { stackCount = lightweaverStacks })
         end
         local premonitionsReadyID = resolveAnySpellID({ "Premonitions" })
-        if premonitionsReadyID and getCooldownReady(premonitionsReadyID) then
+        if premonitionsReadyID and getCooldownReadyByTimer(premonitionsReadyID) then
             addEntry("Premonitions", premonitionsReadyID)
         end
     end
@@ -1471,7 +1471,7 @@ local function buildEntries()
     for _, customSpellID in ipairs(customSpells) do
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
-            and getCooldownReady(customSpellID) then
+            and hasAvailableChargeOrReady(customSpellID) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
     end
