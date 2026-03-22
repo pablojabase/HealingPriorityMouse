@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14] - 2026-03-22
+
+### Added
+- Added conditional glow system with options + slash control (`/hpm glow on|off`) and guarded glow diagnostics (`/hpm glowdebug on|off`).
+- Added Devtools tab with live recommendation logging and in-game debug log viewer.
+- Added class-spell custom tracking UI (add/remove tracked spells) with character-scoped persistence.
+- Added Restoration Shaman `Healing Stream Totem` support with active-totem detection.
+
+### Changed
+- Consolidated all `1.0.14-beta.1` through `1.0.14-beta.8` work plus subsequent untagged `master` hotfixes into this stable release.
+- Reworked recommendation readiness/cooldown hardening for combat API edge cases and protected-value safety.
+- Split `Renewing Mist` and `Life Cocoon` into dedicated spell-specific readiness paths to reduce cross-spell regressions.
+- Reworked glow visuals (outside/clearer/brighter) and aligned glow rendering behavior for compact icon layout.
+
+### Fixed
+- Multiple Discipline regressions across combat visibility/readiness and charge-based glow behavior (`Penance`, `Power Word: Radiance`, `Power Word: Shield`, `Atonement` stability).
+- Multiple Mistweaver regressions affecting `Renewing Mist` charge display/regen and combat fallback behavior.
+- Combat-entry runtime crash from cached charge estimation (`numberGT` nil path) fixed.
+- Several false-hide and false-show regressions in custom tracked spell readiness handling.
+
+### Known Issues
+- `Life Cocoon` readiness is still unstable in some user combat scenarios (reported as disappearing or persistently shown depending on state transitions).
+- This is intentionally deferred for a follow-up patch release with targeted Cocoon-only validation.
+
+### Release Notes
+- This stable release includes a long sequence of untagged hotfix commits made directly to `master` at user request (`push no tags` workflow).
+- For historical detail of intermediate beta checkpoints, see the `1.0.14-beta.*` entries below.
+
 ## [1.0.14-beta.8] - 2026-03-22
 
 ### Added

@@ -150,6 +150,26 @@ When making a release-ready change:
    2. combat entry behavior,
    3. cooldown/charge transitions under spend+recharge.
 
+## 13) Current Handoff State (Post 1.0.14 Release)
+
+Where work currently stands:
+
+- `Renewing Mist` logic is considered stable by user feedback in and out of combat.
+- `Life Cocoon` remains a known unresolved issue and is deferred intentionally to the next patch cycle.
+
+Open bug to carry forward:
+
+- Cocoon readiness can still regress into either:
+   - disappearing unexpectedly (combat and/or non-combat), or
+   - persistent display when not truly ready.
+
+Next-session execution guidance:
+
+1. Treat Cocoon as an isolated bugfix task (do not broaden to shared readiness helpers unless required).
+2. Do not modify `Renewing Mist` path unless a new RM-specific regression is reported.
+3. Validate Cocoon against both combat entry and cooldown transition moments.
+4. Keep release workflow aligned with user preference: fast push to `master`, usually no tags unless explicitly requested.
+
 ## 9) Bootstrap Prompt for New Conversations
 
 Use/paste this into a fresh AI chat:
