@@ -1942,23 +1942,22 @@ local function isPowerWordShieldReady(spellID)
     local cachedEndTime = getPowerWordShieldCachedCooldownEndTime(cached)
     local lastSpendTime = cached and plainNumber(cached.lastSpendTime)
     local inCombat = InCombatLockdown and InCombatLockdown() or false
-
-    if cachedEndTime and numberGT(cachedEndTime, now + 0.05) then
-        local withinCastGuard = lastSpendTime and numberLE(now - lastSpendTime, POWER_WORD_SHIELD_CAST_GUARD_WINDOW)
-        if inCombat or withinCastGuard then
-            updatePowerWordShieldCachedState(spellID, {
-                cooldownReady = false,
-            })
-            return false
-        end
+    local withinCastGuard = lastSpendTime and numberLE(now - lastSpendTime, POWER_WORD_SHIELD_CAST_GUARD_WINDOW)
+    local cacheForcesHidden = false
+    if cachedEndTime and numberGT(cachedEndTime, now + 0.05) and (inCombat or withinCastGuard) then
+        cacheForcesHidden = true
     end
 
     local liveState = readPowerWordShieldLiveCooldownState(spellID)
     if liveState then
         if liveState.ready == false then
+            local liveCooldownEndTime = liveState.cooldownEndTime or 0
+            if cachedEndTime and numberGT(cachedEndTime, liveCooldownEndTime) then
+                liveCooldownEndTime = cachedEndTime
+            end
             updatePowerWordShieldCachedState(spellID, {
                 cooldownReady = false,
-                cooldownEndTime = liveState.cooldownEndTime or 0,
+                cooldownEndTime = liveCooldownEndTime,
                 rechargeStart = liveState.startTime or 0,
                 rechargeDuration = liveState.effectiveDuration or 0,
                 chargeModRate = 1,
@@ -1967,14 +1966,11 @@ local function isPowerWordShieldReady(spellID)
             return false
         end
 
-        if cachedEndTime and numberGT(cachedEndTime, now + 0.05) then
-            local withinCastGuard = lastSpendTime and numberLE(now - lastSpendTime, POWER_WORD_SHIELD_CAST_GUARD_WINDOW)
-            if inCombat or withinCastGuard then
-                updatePowerWordShieldCachedState(spellID, {
-                    cooldownReady = false,
-                })
-                return false
-            end
+        if cacheForcesHidden then
+            updatePowerWordShieldCachedState(spellID, {
+                cooldownReady = false,
+            })
+            return false
         end
 
         updatePowerWordShieldCachedState(spellID, {
@@ -1985,6 +1981,13 @@ local function isPowerWordShieldReady(spellID)
             chargeModRate = 1,
         })
         return true
+    end
+
+    if cacheForcesHidden then
+        updatePowerWordShieldCachedState(spellID, {
+            cooldownReady = false,
+        })
+        return false
     end
 
     if cachedEndTime then
