@@ -147,6 +147,7 @@ local glowDebugState = {}
 local glowStateCache = {}
 local GLOW_CACHE_TTL = 120.0
 local CHARGE_CACHE_TTL = 12.0
+local CHARGE_SPEND_DISPLAY_WINDOW = 1.2
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 local updateCachedGlowState
@@ -610,16 +611,26 @@ end
 
 local function getDisplayChargeState(spellID)
     local estimated = estimateChargeStateFromCache(spellID)
+    local cached = getCachedGlowState(spellID)
     local charges = getSafeCharges(spellID)
     local current = charges and charges.current
     local max = charges and charges.max
+    local recentSpend = false
+
+    if cached and cached.lastSpendTime then
+        recentSpend = numberLE(getNowTime() - cached.lastSpendTime, CHARGE_SPEND_DISPLAY_WINDOW)
+    end
 
     if charges and not charges.unknown and current and max then
         if estimated and estimated.current and estimated.max
             and numberGT(estimated.max, 1)
-            and estimated.max == max
-            and numberGT(estimated.current, current) then
-            return estimated
+            and estimated.max == max then
+            if numberGT(estimated.current, current) then
+                return estimated
+            end
+            if recentSpend and numberGT(current, estimated.current) then
+                return estimated
+            end
         end
         cacheChargeState(spellID, charges)
         return charges
@@ -630,6 +641,15 @@ local function getDisplayChargeState(spellID)
     end
 
     return charges
+end
+
+local function shouldShowCooldownSwipe(spellID)
+    local charges = getDisplayChargeState(spellID)
+    local max = charges and charges.max
+    if charges and not charges.unknown and max and numberGT(max, 1) then
+        return false
+    end
+    return true
 end
 
 local function sanitizeCustomTrackedSpellsInDB()
@@ -1220,12 +1240,25 @@ local function getCooldownReadyByTimer(spellID, failOpen)
             if isFalseFlag(info.isEnabled, false) then
                 info = nil
             else
+                local startTime = plainNumber(info.startTime)
                 local duration = plainNumber(info.duration)
+                local modRate = plainNumber(info.modRate)
+                if not (modRate and numberGT(modRate, 0)) then
+                    modRate = 1
+                end
                 if duration and numberLE(duration, 0) then
                     return true
                 end
                 if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
                     return true
+                end
+                if startTime and duration and numberGT(duration, 0) then
+                    local now = getNowTime()
+                    local effectiveDuration = duration / modRate
+                    if numberLE((startTime + effectiveDuration), now + 0.05) then
+                        return true
+                    end
+                    return false
                 end
                 if duration and numberGT(duration, 0) then
                     return false
@@ -1235,10 +1268,14 @@ local function getCooldownReadyByTimer(spellID, failOpen)
     end
 
     if GetSpellCooldown then
-        local okLegacy, startTime, duration, enabled = pcall(GetSpellCooldown, spellID)
+        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
         if okLegacy then
             local startN = plainNumber(startTime)
             local durationN = plainNumber(duration)
+            local modRateN = plainNumber(modRate)
+            if not (modRateN and numberGT(modRateN, 0)) then
+                modRateN = 1
+            end
             if enabled == 0 then
                 return allowFailOpen
             end
@@ -1247,7 +1284,8 @@ local function getCooldownReadyByTimer(spellID, failOpen)
             end
             if startN and durationN and numberGT(durationN, 0) then
                 local now = getNowTime()
-                if numberLE((startN + durationN), now + 0.05) then
+                local effectiveDuration = durationN / modRateN
+                if numberLE((startN + effectiveDuration), now + 0.05) then
                     return true
                 end
                 return false
@@ -1641,6 +1679,54 @@ local function getAvailableMultiChargeState(spellID)
     end
 
     return nil
+end
+
+local function applyChargeSpendToCache(spellID, liveCharges)
+    local displayCharges = getDisplayChargeState(spellID)
+    if not displayCharges then
+        return
+    end
+
+    local current = displayCharges.current
+    local max = displayCharges.max
+    if not (current and max and numberGT(max, 1)) then
+        return
+    end
+
+    local now = getNowTime()
+    local newCurrent = current
+    local liveCurrent = liveCharges and liveCharges.current
+    local liveMax = liveCharges and liveCharges.max
+    if liveCurrent and liveMax and liveMax == max and numberGT(current, liveCurrent) then
+        newCurrent = liveCurrent
+    elseif numberGT(newCurrent, 0) then
+        newCurrent = newCurrent - 1
+    end
+
+    local rechargeDuration = (liveCharges and liveCharges.rechargeDuration) or displayCharges.rechargeDuration
+    local rechargeStart = (liveCharges and liveCharges.rechargeStart) or displayCharges.rechargeStart
+    local chargeModRate = (liveCharges and liveCharges.chargeModRate) or displayCharges.chargeModRate
+    local patch = {
+        current = newCurrent,
+        max = max,
+        rechargeDuration = rechargeDuration,
+        chargeModRate = chargeModRate,
+        chargeTime = now,
+        lastSpendTime = now,
+    }
+
+    if newCurrent < max then
+        if rechargeStart and numberGT(rechargeStart, 0) then
+            patch.rechargeStart = rechargeStart
+        else
+            patch.rechargeStart = now
+        end
+    else
+        patch.rechargeStart = nil
+        patch.rechargeDuration = nil
+    end
+
+    updateCachedGlowState(spellID, patch)
 end
 
 local function hasAvailableChargeOrReady(spellID)
@@ -2302,7 +2388,7 @@ local function layoutEntries(entries)
             local startTime = info and plainNumber(info.startTime)
             local duration = info and plainNumber(info.duration)
             local isOnGCD = info and isTrueFlag(info.isOnGCD, false)
-            if info and startTime and duration and numberGT(duration, 1.5) and not isOnGCD then
+            if info and startTime and duration and numberGT(duration, 1.5) and not isOnGCD and shouldShowCooldownSwipe(entries[i].spellID) then
                 f.cooldown:SetCooldown(startTime, duration)
             else
                 f.cooldown:Clear()
@@ -3126,7 +3212,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if castSpellID then
             local liveCharges = getSafeCharges(castSpellID)
             local hasLiveChargeState = liveCharges and not liveCharges.unknown and liveCharges.current and liveCharges.max
-            if hasLiveChargeState then
+            if hasLiveChargeState and liveCharges.max and numberGT(liveCharges.max, 1) then
+                applyChargeSpendToCache(castSpellID, liveCharges)
+            elseif hasLiveChargeState then
                 cacheChargeState(castSpellID, liveCharges)
             end
 
@@ -3135,24 +3223,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                 cachedCharges = estimateChargeStateFromCache(castSpellID)
             end
             if cachedCharges and cachedCharges.current and cachedCharges.max and numberGT(cachedCharges.max, 1) then
-                local newCurrent = cachedCharges.current
-                if numberGT(newCurrent, 0) then
-                    newCurrent = newCurrent - 1
-                end
-                local patch = {
-                    current = newCurrent,
-                    max = cachedCharges.max,
-                    chargeModRate = cachedCharges.chargeModRate,
-                    chargeTime = getNowTime(),
-                }
-                if newCurrent < cachedCharges.max then
-                    patch.rechargeDuration = cachedCharges.rechargeDuration
-                    patch.rechargeStart = getNowTime()
-                else
-                    patch.rechargeStart = nil
-                    patch.rechargeDuration = nil
-                end
-                updateCachedGlowState(castSpellID, patch)
+                applyChargeSpendToCache(castSpellID, cachedCharges)
             end
 
             if isLifeCocoonSpell(castSpellID) then
