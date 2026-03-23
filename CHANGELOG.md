@@ -25,6 +25,7 @@ All notable changes to this project are documented in this file.
 - Tightened Discipline charge handling so `Penance` and `Power Word: Radiance` no longer remain visible with zero charges when charge payloads become fuzzy.
 - Spun Discipline `Power Word: Shield` onto a fully dedicated cooldown-only readiness path with its own cast-time timer cache so its icon no longer depends on target state or shared Disc charge behavior.
 - Fixed the dedicated `Power Word: Shield` combat fallback so an active cached timer can still absorb a longer live cooldown instead of resurfacing early off the initial cast-time estimate.
+- Filtered out GCD-length `Power Word: Shield` cooldown reads and seeded its dedicated cache from a real shield cooldown fallback so the icon does not reappear immediately after a combat cast.
 - Improved charge-spend cache updates for `Penance`, `Power Word: Radiance`, and other multi-charge spells so spent charges disappear immediately even when the live API lags behind the cast event.
 - Stopped cooldown swipe/countdown rendering for multi-charge spells such as `Power Word: Radiance` so the icon row does not show the classic cooldown clock overlay there.
 - Tightened cooldown end-time checks so spells like `Power Word: Shield` can reappear closer to Blizzard's own UI timing when cooldown payloads linger briefly.

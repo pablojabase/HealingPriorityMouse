@@ -149,6 +149,8 @@ local GLOW_CACHE_TTL = 120.0
 local CHARGE_CACHE_TTL = 12.0
 local CHARGE_SPEND_DISPLAY_WINDOW = 1.2
 local POWER_WORD_SHIELD_CAST_GUARD_WINDOW = 0.9
+local POWER_WORD_SHIELD_MIN_COOLDOWN = 2.0
+local POWER_WORD_SHIELD_FALLBACK_COOLDOWN = 7.5
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 local updateCachedGlowState
@@ -1687,20 +1689,23 @@ end
 
 local function getPowerWordShieldBaseCooldownDuration(spellID)
     if not GetSpellBaseCooldown then
-        return nil
+        return POWER_WORD_SHIELD_FALLBACK_COOLDOWN
     end
 
     local ok, cooldownMS = pcall(GetSpellBaseCooldown, spellID)
     if not ok then
-        return nil
+        return POWER_WORD_SHIELD_FALLBACK_COOLDOWN
     end
 
     local cooldownSeconds = plainNumber(cooldownMS)
-    if cooldownSeconds and numberGT(cooldownSeconds, 0) then
-        return cooldownSeconds / 1000
+    if cooldownSeconds then
+        cooldownSeconds = cooldownSeconds / 1000
+    end
+    if cooldownSeconds and numberGT(cooldownSeconds, POWER_WORD_SHIELD_MIN_COOLDOWN) then
+        return cooldownSeconds
     end
 
-    return nil
+    return POWER_WORD_SHIELD_FALLBACK_COOLDOWN
 end
 
 local function getPowerWordShieldCachedCooldownEndTime(state)
@@ -1786,6 +1791,10 @@ local function readPowerWordShieldLiveCooldownState(spellID)
                     ready = true,
                     source = "cooldownInfo",
                 }
+            end
+
+            if duration and numberGT(duration, 0) and numberLE(duration, POWER_WORD_SHIELD_MIN_COOLDOWN) then
+                return nil
             end
 
             if duration and numberGT(duration, 0) then
@@ -3633,7 +3642,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                     if not (cooldownModRate and numberGT(cooldownModRate, 0)) then
                         cooldownModRate = 1
                     end
-                    observedShieldDuration = cooldownDuration / cooldownModRate
+                    local effectiveShieldDuration = cooldownDuration / cooldownModRate
+                    if numberGT(effectiveShieldDuration, POWER_WORD_SHIELD_MIN_COOLDOWN) then
+                        observedShieldDuration = effectiveShieldDuration
+                    end
                 end
                 if not (observedShieldDuration and numberGT(observedShieldDuration, 0)) then
                     observedShieldDuration = getPowerWordShieldBaseCooldownDuration(castSpellID)
