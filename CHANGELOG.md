@@ -21,6 +21,12 @@ All notable changes to this project are documented in this file.
 - Improved charge-overlay responsiveness for `Renewing Mist` by preferring timer-estimated charge state when it is newer than stale live charge payloads.
 - Fixed a Lua scoping regression that could error on UI initialization when the new charge-display resolver called `getSafeCharges` before its local binding existed.
 - Fixed the remaining Lua scoping regression in the same charge-display resolver so it binds shared numeric helpers locally instead of falling back to missing globals.
+- Reworked custom tracked-spell management so the add/remove UI only manages user-added spells, not built-in core recommendation spells.
+- Tightened Discipline charge handling so `Penance` and `Power Word: Radiance` no longer remain visible with zero charges when charge payloads become fuzzy.
+- Tightened Discipline `Power Word: Shield` targeting so the icon only appears for an actual friendly mouseover target instead of treating no mouseover as a missing-shield signal.
+
+### Known Issues
+- `Renewing Mist` charge overlays can still lag behind the game by a few seconds in some combat recharge scenarios, even after recent responsiveness improvements.
 
 ## [1.0.14] - 2026-03-22
 

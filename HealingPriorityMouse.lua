@@ -670,7 +670,10 @@ local function sanitizeCustomTrackedSpellsInDB()
     local seen = {}
     for _, value in ipairs(activeList) do
         local spellID = plainNumber(value)
-        if spellID and numberGT(spellID, 0) and not seen[spellID] then
+        if spellID
+            and numberGT(spellID, 0)
+            and not seen[spellID]
+            and not (isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(spellID)) then
             seen[spellID] = true
             normalized[#normalized + 1] = spellID
         end
@@ -726,6 +729,12 @@ local function addSpellOption(options, seen, spellID)
     if not id or not numberGT(id, 0) or seen[id] then
         return
     end
+    if isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(id) then
+        return
+    end
+    if isSpellInTrackedList(id) then
+        return
+    end
     if not isSpellKnownSafe(id) then
         return
     end
@@ -757,6 +766,7 @@ local CLASS_SPELL_KEYS = {
 }
 
 local getSpecID
+local isReservedCoreTrackedSpellID
 
 local SPEC_CUSTOM_SPELL_IDS = {
     [105] = { -- Restoration Druid
@@ -835,6 +845,24 @@ local CORE_SPELL_KEYS_BY_SPEC = {
     [257] = { "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
 }
 
+isReservedCoreTrackedSpellID = function(spellID)
+    local id = plainNumber(spellID)
+    if not id or not numberGT(id, 0) then
+        return false
+    end
+
+    for _, keys in pairs(CORE_SPELL_KEYS_BY_SPEC) do
+        for _, key in ipairs(keys) do
+            local resolvedID = resolveSpellID(key)
+            if resolvedID and resolvedID == id then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 local function collectKnownClassSpellOptions()
     local options = {}
     local seen = {}
@@ -865,6 +893,9 @@ local function addCustomTrackedSpell(spellID)
     if not id or not numberGT(id, 0) then
         return false, "invalid"
     end
+    if isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(id) then
+        return false, "core-managed"
+    end
     if not isValidSpellID(id) then
         return false, "not-found"
     end
@@ -881,41 +912,7 @@ local function addCustomTrackedSpell(spellID)
 end
 
 local function ensureDefaultTrackedSpellsForActiveSpec()
-    local db = HealingPriorityMouseDB
-    if not db then
-        return
-    end
-
-    local specID = getSpecID()
-    if not specID then
-        return
-    end
-
-    local playerName, realmName = UnitFullName("player")
-    playerName = playerName or UnitName("player") or "Unknown"
-    realmName = realmName or GetRealmName() or "Unknown"
-    local characterKey = tostring(playerName) .. "-" .. tostring(realmName)
-
-    if type(db.customTrackedSpecsInitializedByCharacter) ~= "table" then
-        db.customTrackedSpecsInitializedByCharacter = {}
-    end
-    if type(db.customTrackedSpecsInitializedByCharacter[characterKey]) ~= "table" then
-        db.customTrackedSpecsInitializedByCharacter[characterKey] = {}
-    end
-
-    if db.customTrackedSpecsInitializedByCharacter[characterKey][specID] then
-        return
-    end
-
-    local keys = CORE_SPELL_KEYS_BY_SPEC[specID] or {}
-    for _, key in ipairs(keys) do
-        local spellID = resolveSpellID(key)
-        if spellID and isSpellKnownSafe(spellID) and not isSpellInTrackedList(spellID) then
-            addCustomTrackedSpell(spellID)
-        end
-    end
-
-    db.customTrackedSpecsInitializedByCharacter[characterKey][specID] = true
+    sanitizeCustomTrackedSpellsInDB()
 end
 
 local function removeCustomTrackedSpell(spellID)
@@ -1626,34 +1623,38 @@ local function isLifeCocoonReady(spellID)
     return false
 end
 
+local function getAvailableMultiChargeState(spellID)
+    local charges = getDisplayChargeState(spellID)
+    if not charges then
+        return nil
+    end
+
+    if charges.unknown then
+        return false
+    end
+
+    local current = charges.current
+    local max = charges.max
+    if current and max and numberGT(max, 1) then
+        cacheChargeState(spellID, charges)
+        return numberGT(current, 0)
+    end
+
+    return nil
+end
+
 local function hasAvailableChargeOrReady(spellID)
-    local charges = getSafeCharges(spellID)
-    if charges and not charges.unknown then
-        local current = charges.current
-        local max = charges.max
-        if current and max and numberGT(max, 1) then
-            cacheChargeState(spellID, charges)
-            if numberGT(current, 0) then
-                return true
-            end
-            return false
-        end
+    local chargeAvailable = getAvailableMultiChargeState(spellID)
+    if chargeAvailable ~= nil then
+        return chargeAvailable
     end
     return getCooldownReadyByTimer(spellID, true)
 end
 
 local function hasAvailableChargeOrReadyStrict(spellID)
-    local charges = getSafeCharges(spellID)
-    if charges and not charges.unknown then
-        local current = charges.current
-        local max = charges.max
-        if current and max and numberGT(max, 1) then
-            cacheChargeState(spellID, charges)
-            if numberGT(current, 0) then
-                return true
-            end
-            return false
-        end
+    local chargeAvailable = getAvailableMultiChargeState(spellID)
+    if chargeAvailable ~= nil then
+        return chargeAvailable
     end
     local strictReady = getCooldownReadyByTimer(spellID, false)
     if strictReady then
@@ -1959,6 +1960,7 @@ local SPELL_POLICIES = {
         label = "Power Word: Shield",
         condition = "auraMissingOnMouseover",
         readiness = "chargeOrCooldown",
+        requireMouseover = true,
     },
     PowerWordRadiance = {
         label = "Power Word: Radiance",
@@ -2487,7 +2489,7 @@ refreshOptionsControls = function()
             UIDropDownMenu_SetText(optionsControls.customSpellDropdown, getSpellLabel(selectedSpellID))
             optionsControls.addSpellButton:Enable()
         else
-            UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "No class spells available")
+            UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "All addable spells already tracked")
             optionsControls.addSpellButton:Disable()
         end
     end
@@ -2841,7 +2843,7 @@ local function createOptionsFrame()
         local options = (optionsControls and optionsControls.customSpellOptions) or {}
         if #options == 0 then
             local info = UIDropDownMenu_CreateInfo()
-            info.text = "No class spells available"
+            info.text = "All addable spells already tracked"
             info.disabled = true
             UIDropDownMenu_AddButton(info, level)
             return
@@ -2867,7 +2869,7 @@ local function createOptionsFrame()
     addSpellButton:SetText("Add")
 
     local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    customSpellHint:SetText("Dropdown shows known spells for this character class.")
+    customSpellHint:SetText("Dropdown shows additional known spells you can track for this character.")
 
     local customSpellListScroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     local customSpellListContent = CreateFrame("Frame", nil, customSpellListScroll)
@@ -2876,7 +2878,7 @@ local function createOptionsFrame()
 
     local customSpellEmpty = customSpellListContent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     customSpellEmpty:SetPoint("TOPLEFT", customSpellListContent, "TOPLEFT", 2, -6)
-    customSpellEmpty:SetText("No custom spells added.")
+    customSpellEmpty:SetText("No additional tracked spells added.")
 
     local customSpellRows = {}
 
@@ -2978,6 +2980,8 @@ local function createOptionsFrame()
         end
         if reason == "duplicate" then
             msg("custom spell already tracked")
+        elseif reason == "core-managed" then
+            msg("that spell is already handled by the built-in core logic")
         elseif reason == "not-found" then
             msg("selected spell is not available on this client")
         else
