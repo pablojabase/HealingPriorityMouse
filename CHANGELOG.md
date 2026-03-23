@@ -18,6 +18,7 @@ All notable changes to this project are documented in this file.
 - Fixed `Life Cocoon` staying hidden through the rest of combat after recharging by allowing single-charge cached recharge state to estimate back to ready in combat.
 - Tightened `Life Cocoon` dedicated combat fallback so cache/charge state only proves readiness when a stored cooldown timer has actually elapsed, reducing always-visible false positives.
 - Fixed `Life Cocoon` early combat reappearance caused by `rechargeStart=0` payloads being mistaken for an active elapsed timer.
+- Improved charge-overlay responsiveness for `Renewing Mist` by preferring timer-estimated charge state when it is newer than stale live charge payloads.
 
 ## [1.0.14] - 2026-03-22
 

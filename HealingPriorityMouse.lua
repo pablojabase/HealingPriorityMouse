@@ -296,6 +296,30 @@ local function cacheChargeState(spellID, chargeState)
     })
 end
 
+local function getDisplayChargeState(spellID)
+    local estimated = estimateChargeStateFromCache(spellID)
+    local charges = getSafeCharges(spellID)
+    local current = charges and charges.current
+    local max = charges and charges.max
+
+    if charges and not charges.unknown and current and max then
+        if estimated and estimated.current and estimated.max
+            and numberGT(estimated.max, 1)
+            and estimated.max == max
+            and numberGT(estimated.current, current) then
+            return estimated
+        end
+        cacheChargeState(spellID, charges)
+        return charges
+    end
+
+    if estimated and estimated.current and estimated.max and numberGT(estimated.max, 1) then
+        return estimated
+    end
+
+    return charges
+end
+
 updateCachedGlowState = function(spellID, patch)
     if not spellID then
         return
@@ -998,7 +1022,7 @@ local function shouldGlowEntry(entry)
     end
 
     if rule.mode == "chargesAtMax" then
-        local charges = getSafeCharges(entry.spellID)
+        local charges = getDisplayChargeState(entry.spellID)
         local current = charges and charges.current
         local max = charges and charges.max
 
@@ -1460,7 +1484,7 @@ local function isAuraMissingOnMouseover(spellID)
 end
 
 local function isSpellAtMaxCharges(spellID)
-    local charges = getSafeCharges(spellID)
+    local charges = getDisplayChargeState(spellID)
     local current = charges and charges.current
     local max = charges and charges.max
     return charges
@@ -2288,7 +2312,7 @@ local function layoutEntries(entries)
             f.chargeText:SetText(entries[i].iconCount)
             f.chargeText:Show()
         elseif HealingPriorityMouseDB.showCharges then
-            local charges = getSafeCharges(entries[i].spellID)
+            local charges = getDisplayChargeState(entries[i].spellID)
             if charges and charges.unknown then
                 local cached = estimateChargeStateFromCache(entries[i].spellID)
                 if cached and cached.current and cached.max and numberGT(cached.max, 1) then
