@@ -148,10 +148,12 @@ local glowStateCache = {}
 local GLOW_CACHE_TTL = 120.0
 local CHARGE_CACHE_TTL = 12.0
 local CHARGE_SPEND_DISPLAY_WINDOW = 1.2
+local POWER_WORD_SHIELD_CAST_GUARD_WINDOW = 0.9
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 local updateCachedGlowState
 local getSafeCharges
+local resolveSpellID
 
 local function getNowTime()
     if GetTime then
@@ -310,7 +312,7 @@ updateCachedGlowState = function(spellID, patch)
     glowStateCache[spellID] = state
 end
 
-local function resolveSpellID(key)
+resolveSpellID = function(key)
     if resolvedSpells[key] ~= nil then
         return resolvedSpells[key]
     end
@@ -1608,6 +1610,250 @@ local function getCachedRechargeTimerReady(state)
     return false
 end
 
+local function getPowerWordShieldCacheKeys(spellID)
+    local keys = {}
+    local seen = {}
+
+    local function addKey(value)
+        if not value or seen[value] then
+            return
+        end
+        seen[value] = true
+        keys[#keys + 1] = value
+    end
+
+    addKey(resolveSpellID("PowerWordShield"))
+    addKey(spellID)
+    for _, candidate in ipairs(SPELLS.PowerWordShield or {}) do
+        addKey(candidate)
+    end
+
+    return keys
+end
+
+local function getPowerWordShieldCachedState(spellID)
+    local freshest
+    for _, key in ipairs(getPowerWordShieldCacheKeys(spellID)) do
+        local state = getCachedGlowState(key)
+        if state and ((not freshest) or ((state.time or 0) > (freshest.time or 0))) then
+            freshest = state
+        end
+    end
+    return freshest
+end
+
+local function updatePowerWordShieldCachedState(spellID, patch)
+    for _, key in ipairs(getPowerWordShieldCacheKeys(spellID)) do
+        updateCachedGlowState(key, patch)
+    end
+end
+
+local function getPowerWordShieldDurationObjectValue(durationObject, methodName)
+    if not durationObject or type(methodName) ~= "string" then
+        return nil
+    end
+    local method = durationObject[methodName]
+    if type(method) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(method, durationObject)
+    if not ok then
+        return nil
+    end
+    return plainNumber(value)
+end
+
+local function getPowerWordShieldObservedCooldownDuration(state)
+    if not state then
+        return nil
+    end
+
+    local duration = plainNumber(state.lastObservedCooldownDuration)
+    if duration and numberGT(duration, 0) then
+        return duration
+    end
+
+    local rechargeDuration = plainNumber(state.rechargeDuration)
+    local chargeModRate = plainNumber(state.chargeModRate)
+    if rechargeDuration and numberGT(rechargeDuration, 0) then
+        if not (chargeModRate and numberGT(chargeModRate, 0)) then
+            chargeModRate = 1
+        end
+        return rechargeDuration / chargeModRate
+    end
+
+    return nil
+end
+
+local function getPowerWordShieldBaseCooldownDuration(spellID)
+    if not GetSpellBaseCooldown then
+        return nil
+    end
+
+    local ok, cooldownMS = pcall(GetSpellBaseCooldown, spellID)
+    if not ok then
+        return nil
+    end
+
+    local cooldownSeconds = plainNumber(cooldownMS)
+    if cooldownSeconds and numberGT(cooldownSeconds, 0) then
+        return cooldownSeconds / 1000
+    end
+
+    return nil
+end
+
+local function getPowerWordShieldCachedCooldownEndTime(state)
+    if not state then
+        return nil
+    end
+
+    local cooldownEndTime = plainNumber(state.cooldownEndTime)
+    if cooldownEndTime and numberGT(cooldownEndTime, 0) then
+        return cooldownEndTime
+    end
+
+    local rechargeStart = plainNumber(state.rechargeStart)
+    local rechargeDuration = plainNumber(state.rechargeDuration)
+    local chargeModRate = plainNumber(state.chargeModRate)
+    if rechargeStart and rechargeDuration and numberGT(rechargeStart, 0) and numberGT(rechargeDuration, 0) then
+        if not (chargeModRate and numberGT(chargeModRate, 0)) then
+            chargeModRate = 1
+        end
+        return rechargeStart + (rechargeDuration / chargeModRate)
+    end
+
+    return nil
+end
+
+local function readPowerWordShieldLiveCooldownState(spellID)
+    local now = getNowTime()
+
+    if C_Spell and C_Spell.GetSpellCooldownDuration then
+        local okDuration, durationObject = pcall(C_Spell.GetSpellCooldownDuration, spellID)
+        if okDuration and durationObject then
+            local remaining = getPowerWordShieldDurationObjectValue(durationObject, "GetRemainingDuration")
+            local startTime = getPowerWordShieldDurationObjectValue(durationObject, "GetStartTime")
+            local duration = getPowerWordShieldDurationObjectValue(durationObject, "GetDuration")
+            local modRate = getPowerWordShieldDurationObjectValue(durationObject, "GetModRate")
+            if not (modRate and numberGT(modRate, 0)) then
+                modRate = 1
+            end
+
+            if remaining and numberGT(remaining, 0.05) then
+                local effectiveDuration = duration and numberGT(duration, 0) and (duration / modRate) or remaining
+                local cooldownEndTime = now + remaining
+                if startTime and numberGT(startTime, 0) and effectiveDuration and numberGT(effectiveDuration, 0) then
+                    cooldownEndTime = startTime + effectiveDuration
+                end
+                return {
+                    ready = false,
+                    cooldownEndTime = cooldownEndTime,
+                    effectiveDuration = effectiveDuration,
+                    startTime = startTime,
+                    source = "durationObject",
+                }
+            end
+
+            if remaining and numberLE(remaining, 0.05) then
+                return {
+                    ready = true,
+                    source = "durationObject",
+                }
+            end
+        end
+    end
+
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local okCooldown, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if okCooldown and type(info) == "table" and not isFalseFlag(info.isEnabled, false) then
+            local startTime = plainNumber(info.startTime)
+            local duration = plainNumber(info.duration)
+            local modRate = plainNumber(info.modRate)
+            if not (modRate and numberGT(modRate, 0)) then
+                modRate = 1
+            end
+
+            if duration and numberLE(duration, 0) then
+                return {
+                    ready = true,
+                    source = "cooldownInfo",
+                }
+            end
+
+            if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+                return {
+                    ready = true,
+                    source = "cooldownInfo",
+                }
+            end
+
+            if duration and numberGT(duration, 0) then
+                local effectiveDuration = duration / modRate
+                local cooldownEndTime = now + effectiveDuration
+                if startTime and numberGT(startTime, 0) then
+                    cooldownEndTime = startTime + effectiveDuration
+                end
+                if numberLE(cooldownEndTime, now + 0.05) then
+                    return {
+                        ready = true,
+                        source = "cooldownInfo",
+                    }
+                end
+                return {
+                    ready = false,
+                    cooldownEndTime = cooldownEndTime,
+                    effectiveDuration = effectiveDuration,
+                    startTime = startTime,
+                    source = "cooldownInfo",
+                }
+            end
+        end
+    end
+
+    if GetSpellCooldown then
+        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
+        if okLegacy and enabled ~= 0 then
+            local startN = plainNumber(startTime)
+            local durationN = plainNumber(duration)
+            local modRateN = plainNumber(modRate)
+            if not (modRateN and numberGT(modRateN, 0)) then
+                modRateN = 1
+            end
+
+            if durationN and numberLE(durationN, 0) then
+                return {
+                    ready = true,
+                    source = "legacyCooldown",
+                }
+            end
+
+            if durationN and numberGT(durationN, 0) then
+                local effectiveDuration = durationN / modRateN
+                local cooldownEndTime = now + effectiveDuration
+                if startN and numberGT(startN, 0) then
+                    cooldownEndTime = startN + effectiveDuration
+                end
+                if numberLE(cooldownEndTime, now + 0.05) then
+                    return {
+                        ready = true,
+                        source = "legacyCooldown",
+                    }
+                end
+                return {
+                    ready = false,
+                    cooldownEndTime = cooldownEndTime,
+                    effectiveDuration = effectiveDuration,
+                    startTime = startN,
+                    source = "legacyCooldown",
+                }
+            end
+        end
+    end
+
+    return nil
+end
+
 local function isLifeCocoonReady(spellID)
     local now = getNowTime()
     local cached = getCachedGlowState(spellID)
@@ -1686,79 +1932,77 @@ local function isLifeCocoonReady(spellID)
     return false
 end
 
-local function getDeterministicCooldownReady(spellID)
+local function isPowerWordShieldReady(spellID)
     if not isSpellKnownSafe(spellID) then
         return false
     end
 
-    if C_Spell and C_Spell.GetSpellCooldown then
-        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-        if ok and info and not isFalseFlag(info.isEnabled, false) then
-            local startTime = plainNumber(info.startTime)
-            local duration = plainNumber(info.duration)
-            local modRate = plainNumber(info.modRate)
-            if not (modRate and numberGT(modRate, 0)) then
-                modRate = 1
-            end
+    local now = getNowTime()
+    local cached = getPowerWordShieldCachedState(spellID)
+    local cachedEndTime = getPowerWordShieldCachedCooldownEndTime(cached)
+    local lastSpendTime = cached and plainNumber(cached.lastSpendTime)
+    local inCombat = InCombatLockdown and InCombatLockdown() or false
 
-            if duration and numberLE(duration, 0) then
-                return true
-            end
-            if startTime and duration and numberGT(duration, 0) then
-                local now = getNowTime()
-                local effectiveDuration = duration / modRate
-                if numberLE((startTime + effectiveDuration), now + 0.05) then
-                    return true
-                end
+    if cachedEndTime and numberGT(cachedEndTime, now + 0.05) then
+        local withinCastGuard = lastSpendTime and numberLE(now - lastSpendTime, POWER_WORD_SHIELD_CAST_GUARD_WINDOW)
+        if inCombat or withinCastGuard then
+            updatePowerWordShieldCachedState(spellID, {
+                cooldownReady = false,
+            })
+            return false
+        end
+    end
+
+    local liveState = readPowerWordShieldLiveCooldownState(spellID)
+    if liveState then
+        if liveState.ready == false then
+            updatePowerWordShieldCachedState(spellID, {
+                cooldownReady = false,
+                cooldownEndTime = liveState.cooldownEndTime or 0,
+                rechargeStart = liveState.startTime or 0,
+                rechargeDuration = liveState.effectiveDuration or 0,
+                chargeModRate = 1,
+                lastObservedCooldownDuration = liveState.effectiveDuration or 0,
+            })
+            return false
+        end
+
+        if cachedEndTime and numberGT(cachedEndTime, now + 0.05) then
+            local withinCastGuard = lastSpendTime and numberLE(now - lastSpendTime, POWER_WORD_SHIELD_CAST_GUARD_WINDOW)
+            if inCombat or withinCastGuard then
+                updatePowerWordShieldCachedState(spellID, {
+                    cooldownReady = false,
+                })
                 return false
             end
         end
+
+        updatePowerWordShieldCachedState(spellID, {
+            cooldownReady = true,
+            cooldownEndTime = 0,
+            rechargeStart = 0,
+            rechargeDuration = 0,
+            chargeModRate = 1,
+        })
+        return true
     end
 
-    if GetSpellCooldown then
-        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
-        if okLegacy then
-            local startN = plainNumber(startTime)
-            local durationN = plainNumber(duration)
-            local modRateN = plainNumber(modRate)
-            if not (modRateN and numberGT(modRateN, 0)) then
-                modRateN = 1
-            end
-            if enabled ~= 0 then
-                if durationN and numberLE(durationN, 0) then
-                    return true
-                end
-                if startN and durationN and numberGT(durationN, 0) then
-                    local now = getNowTime()
-                    local effectiveDuration = durationN / modRateN
-                    if numberLE((startN + effectiveDuration), now + 0.05) then
-                        return true
-                    end
-                    return false
-                end
-            end
+    if cachedEndTime then
+        if numberGT(cachedEndTime, now + 0.05) then
+            updatePowerWordShieldCachedState(spellID, {
+                cooldownReady = false,
+            })
+            return false
         end
-    end
 
-    return nil
-end
-
-local function isPowerWordShieldReady(spellID)
-    local determinedReady = getDeterministicCooldownReady(spellID)
-    if determinedReady ~= nil then
-        updateCachedGlowState(spellID, {
-            cooldownReady = determinedReady,
+        updatePowerWordShieldCachedState(spellID, {
+            cooldownReady = true,
+            cooldownEndTime = 0,
+            rechargeStart = 0,
+            rechargeDuration = 0,
+            chargeModRate = 1,
         })
-        return determinedReady
-    end
-
-    local cached = getCachedGlowState(spellID)
-    local cachedTimerReady = getCachedRechargeTimerReady(cached)
-    if cachedTimerReady ~= nil then
-        updateCachedGlowState(spellID, {
-            cooldownReady = cachedTimerReady,
-        })
-        return cachedTimerReady
+        return true
     end
 
     if cached and cached.cooldownReady ~= nil then
@@ -3369,7 +3613,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
 
             if isPowerWordShieldSpell(castSpellID) then
-                local shieldCacheKey = resolveSpellID("PowerWordShield") or castSpellID
+                local previousShieldState = getPowerWordShieldCachedState(castSpellID)
+                local observedShieldDuration = getPowerWordShieldObservedCooldownDuration(previousShieldState)
                 local cooldownStart
                 local cooldownDuration
                 local cooldownModRate
@@ -3381,19 +3626,34 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                         cooldownModRate = plainNumber(cooldownInfo.modRate)
                     end
                 end
+                if cooldownDuration and numberGT(cooldownDuration, 0) then
+                    if not (cooldownModRate and numberGT(cooldownModRate, 0)) then
+                        cooldownModRate = 1
+                    end
+                    observedShieldDuration = cooldownDuration / cooldownModRate
+                end
+                if not (observedShieldDuration and numberGT(observedShieldDuration, 0)) then
+                    observedShieldDuration = getPowerWordShieldBaseCooldownDuration(castSpellID)
+                end
+                local shieldNow = getNowTime()
                 local shieldState = {
                     cooldownReady = false,
-                    lastSpendTime = getNowTime(),
+                    lastSpendTime = shieldNow,
                 }
-                if cooldownDuration and numberGT(cooldownDuration, 0) then
-                    shieldState.rechargeStart = cooldownStart or getNowTime()
-                    shieldState.rechargeDuration = cooldownDuration
-                    shieldState.chargeModRate = cooldownModRate
+                if observedShieldDuration and numberGT(observedShieldDuration, 0) then
+                    local cooldownStartTime = cooldownStart
+                    if not (cooldownStartTime and numberGT(cooldownStartTime, 0)) then
+                        cooldownStartTime = shieldNow
+                    end
+                    shieldState.rechargeStart = cooldownStartTime
+                    shieldState.rechargeDuration = observedShieldDuration
+                    shieldState.chargeModRate = 1
+                    shieldState.cooldownEndTime = cooldownStartTime + observedShieldDuration
+                    shieldState.lastObservedCooldownDuration = observedShieldDuration
+                elseif previousShieldState and previousShieldState.lastObservedCooldownDuration then
+                    shieldState.lastObservedCooldownDuration = previousShieldState.lastObservedCooldownDuration
                 end
-                updateCachedGlowState(shieldCacheKey, shieldState)
-                if shieldCacheKey ~= castSpellID then
-                    updateCachedGlowState(castSpellID, shieldState)
-                end
+                updatePowerWordShieldCachedState(castSpellID, shieldState)
             end
         end
     end
