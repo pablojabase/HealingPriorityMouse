@@ -20,6 +20,7 @@ All notable changes to this project are documented in this file.
 - Fixed `Life Cocoon` early combat reappearance caused by `rechargeStart=0` payloads being mistaken for an active elapsed timer.
 - Improved charge-overlay responsiveness for `Renewing Mist` by preferring timer-estimated charge state when it is newer than stale live charge payloads.
 - Fixed a Lua scoping regression that could error on UI initialization when the new charge-display resolver called `getSafeCharges` before its local binding existed.
+- Fixed the remaining Lua scoping regression in the same charge-display resolver so it binds shared numeric helpers locally instead of falling back to missing globals.
 
 ## [1.0.14] - 2026-03-22
 

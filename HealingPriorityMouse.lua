@@ -297,30 +297,6 @@ local function cacheChargeState(spellID, chargeState)
     })
 end
 
-local function getDisplayChargeState(spellID)
-    local estimated = estimateChargeStateFromCache(spellID)
-    local charges = getSafeCharges(spellID)
-    local current = charges and charges.current
-    local max = charges and charges.max
-
-    if charges and not charges.unknown and current and max then
-        if estimated and estimated.current and estimated.max
-            and numberGT(estimated.max, 1)
-            and estimated.max == max
-            and numberGT(estimated.current, current) then
-            return estimated
-        end
-        cacheChargeState(spellID, charges)
-        return charges
-    end
-
-    if estimated and estimated.current and estimated.max and numberGT(estimated.max, 1) then
-        return estimated
-    end
-
-    return charges
-end
-
 updateCachedGlowState = function(spellID, patch)
     if not spellID then
         return
@@ -630,6 +606,30 @@ getSafeCharges = function(spellID)
     end
 
     return nil
+end
+
+local function getDisplayChargeState(spellID)
+    local estimated = estimateChargeStateFromCache(spellID)
+    local charges = getSafeCharges(spellID)
+    local current = charges and charges.current
+    local max = charges and charges.max
+
+    if charges and not charges.unknown and current and max then
+        if estimated and estimated.current and estimated.max
+            and numberGT(estimated.max, 1)
+            and estimated.max == max
+            and numberGT(estimated.current, current) then
+            return estimated
+        end
+        cacheChargeState(spellID, charges)
+        return charges
+    end
+
+    if estimated and estimated.current and estimated.max and numberGT(estimated.max, 1) then
+        return estimated
+    end
+
+    return charges
 end
 
 local function sanitizeCustomTrackedSpellsInDB()
