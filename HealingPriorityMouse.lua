@@ -184,7 +184,21 @@ local function getRecentChargeState(spellID)
 
     local chargeTime = state.chargeTime or state.time or 0
     local age = getNowTime() - chargeTime
-    if age > CHARGE_CACHE_TTL then
+    local ttl = CHARGE_CACHE_TTL
+    local rechargeDuration = state.rechargeDuration
+    local current = state.current
+    local max = state.max
+    local chargeModRate = state.chargeModRate
+    if not chargeModRate or chargeModRate <= 0 then
+        chargeModRate = 1
+    end
+    if rechargeDuration and rechargeDuration > 0 and current and max and max >= current then
+        local missingCharges = max - current
+        if missingCharges > 0 then
+            ttl = math.max(ttl, ((rechargeDuration / chargeModRate) * missingCharges) + 1)
+        end
+    end
+    if age > ttl then
         return nil
     end
     return state
@@ -222,13 +236,19 @@ local function estimateChargeStateFromCache(spellID)
         return state
     end
 
+    local chargeModRate = state.chargeModRate
+    if not (chargeModRate and gt(chargeModRate, 0)) then
+        chargeModRate = 1
+    end
+
     local now = getNowTime()
     if le(now, rechargeStart) then
         return state
     end
 
     local elapsed = now - rechargeStart
-    local gainedCharges = math.floor(elapsed / rechargeDuration)
+    local effectiveElapsed = elapsed * chargeModRate
+    local gainedCharges = math.floor(effectiveElapsed / rechargeDuration)
     if gainedCharges <= 0 then
         return state
     end
@@ -238,10 +258,12 @@ local function estimateChargeStateFromCache(spellID)
         current = newCurrent,
         max = max,
         chargeTime = now,
+        chargeModRate = chargeModRate,
     }
 
     if newCurrent < max then
-        patch.rechargeStart = rechargeStart + (gainedCharges * rechargeDuration)
+        local elapsedAfterGain = effectiveElapsed - (gainedCharges * rechargeDuration)
+        patch.rechargeStart = now - (elapsedAfterGain / chargeModRate)
         patch.rechargeDuration = rechargeDuration
     else
         patch.rechargeStart = nil
@@ -266,6 +288,7 @@ local function cacheChargeState(spellID, chargeState)
         max = max,
         rechargeStart = chargeState.rechargeStart,
         rechargeDuration = chargeState.rechargeDuration,
+        chargeModRate = chargeState.chargeModRate,
         chargeTime = getNowTime(),
     })
 end
@@ -507,18 +530,20 @@ end
 local function getSafeCharges(spellID)
     if not (C_Spell and C_Spell.GetSpellCharges) then
         if GetSpellCharges then
-            local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy = pcall(GetSpellCharges, spellID)
+            local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy, chargeModRateLegacy = pcall(GetSpellCharges, spellID)
             if okLegacy then
                 local currentLegacyN = plainNumber(currentLegacy)
                 local maxLegacyN = plainNumber(maxLegacy)
                 local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
                 local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
+                local chargeModRateLegacyN = plainNumber(chargeModRateLegacy)
                 if currentLegacyN and maxLegacyN then
                     return {
                         current = currentLegacyN,
                         max = maxLegacyN,
                         rechargeStart = cooldownStartLegacyN,
                         rechargeDuration = cooldownDurationLegacyN,
+                        chargeModRate = chargeModRateLegacyN,
                         unknown = false,
                     }
                 end
@@ -536,6 +561,7 @@ local function getSafeCharges(spellID)
     local max = plainNumber(charges.maxCharges)
     local cooldownStart = plainNumber(charges.cooldownStartTime)
     local cooldownDuration = plainNumber(charges.cooldownDuration)
+    local chargeModRate = plainNumber(charges.chargeModRate)
 
     if current and max then
         return {
@@ -543,23 +569,26 @@ local function getSafeCharges(spellID)
             max = max,
             rechargeStart = cooldownStart,
             rechargeDuration = cooldownDuration,
+            chargeModRate = chargeModRate,
             unknown = false,
         }
     end
 
     if GetSpellCharges then
-        local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy = pcall(GetSpellCharges, spellID)
+        local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy, chargeModRateLegacy = pcall(GetSpellCharges, spellID)
         if okLegacy then
             local currentLegacyN = plainNumber(currentLegacy)
             local maxLegacyN = plainNumber(maxLegacy)
             local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
             local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
+            local chargeModRateLegacyN = plainNumber(chargeModRateLegacy)
             if currentLegacyN and maxLegacyN then
                 return {
                     current = currentLegacyN,
                     max = maxLegacyN,
                     rechargeStart = cooldownStartLegacyN,
                     rechargeDuration = cooldownDurationLegacyN,
+                    chargeModRate = chargeModRateLegacyN,
                     unknown = false,
                 }
             end
@@ -1440,6 +1469,7 @@ local function isSpellAtMaxCharges(spellID)
 end
 
 local LIFE_COCOON_SPELL_ID = 116849
+local LIFE_COCOON_CAST_GUARD_WINDOW = 1.0
 
 local function isRenewingMistReady(spellID)
     local charges = getSafeCharges(spellID)
@@ -1465,6 +1495,13 @@ local function isLifeCocoonSpell(spellID)
 end
 
 local function isLifeCocoonReady(spellID)
+    local now = getNowTime()
+    local cached = getCachedGlowState(spellID)
+    local lastSpendTime = cached and cached.lastSpendTime
+    if lastSpendTime and numberLE((now - lastSpendTime), LIFE_COCOON_CAST_GUARD_WINDOW) then
+        return false
+    end
+
     local determinedReady = nil
 
     if C_Spell and C_Spell.GetSpellCooldown then
@@ -1501,6 +1538,20 @@ local function isLifeCocoonReady(spellID)
         end
     end
 
+    local charges = getSafeCharges(spellID)
+    if charges and not charges.unknown then
+        local current = charges.current
+        local max = charges.max
+        if current and max then
+            cacheChargeState(spellID, charges)
+            if numberLE(current, 0) then
+                determinedReady = false
+            elseif determinedReady == nil and numberGE(max, 1) and numberGT(current, 0) then
+                determinedReady = true
+            end
+        end
+    end
+
     if determinedReady ~= nil then
         updateCachedGlowState(spellID, {
             cooldownReady = determinedReady,
@@ -1508,7 +1559,11 @@ local function isLifeCocoonReady(spellID)
         return determinedReady
     end
 
-    local cached = getCachedGlowState(spellID)
+    local cachedChargeState = getRecentChargeState(spellID)
+    if cachedChargeState and cachedChargeState.current and numberLE(cachedChargeState.current, 0) then
+        return false
+    end
+
     if cached and cached.cooldownReady ~= nil then
         return cached.cooldownReady and true or false
     end
@@ -1671,6 +1726,7 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(chargeFields, "max", chargeInfo and chargeInfo.max)
     appendDiagnosticField(chargeFields, "rechargeStart", chargeInfo and chargeInfo.rechargeStart)
     appendDiagnosticField(chargeFields, "rechargeDuration", chargeInfo and chargeInfo.rechargeDuration)
+    appendDiagnosticField(chargeFields, "chargeModRate", chargeInfo and chargeInfo.chargeModRate)
     appendDiagnosticField(chargeFields, "unknown", chargeInfo and chargeInfo.unknown)
     emitDiagnosticLine("apidump charges", chargeFields)
 
@@ -1733,8 +1789,10 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(cachedFields, "max", cached and cached.max)
     appendDiagnosticField(cachedFields, "rechargeStart", cached and cached.rechargeStart)
     appendDiagnosticField(cachedFields, "rechargeDuration", cached and cached.rechargeDuration)
+    appendDiagnosticField(cachedFields, "chargeModRate", cached and cached.chargeModRate)
     appendDiagnosticField(cachedFields, "chargeTime", cached and cached.chargeTime)
     appendDiagnosticField(cachedFields, "cooldownReady", cached and cached.cooldownReady)
+    appendDiagnosticField(cachedFields, "lastSpendTime", cached and cached.lastSpendTime)
     appendDiagnosticField(cachedFields, "shouldGlow", cached and cached.shouldGlow)
     appendDiagnosticField(cachedFields, "stackCount", cached and cached.stackCount)
     emitDiagnosticLine("apidump cache", cachedFields)
@@ -1745,6 +1803,7 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(estimatedFields, "max", estimated and estimated.max)
     appendDiagnosticField(estimatedFields, "rechargeStart", estimated and estimated.rechargeStart)
     appendDiagnosticField(estimatedFields, "rechargeDuration", estimated and estimated.rechargeDuration)
+    appendDiagnosticField(estimatedFields, "chargeModRate", estimated and estimated.chargeModRate)
     appendDiagnosticField(estimatedFields, "chargeTime", estimated and estimated.chargeTime)
     emitDiagnosticLine("apidump estimated", estimatedFields)
 
@@ -2967,6 +3026,7 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
@@ -3005,25 +3065,53 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
         local castSpellID = plainNumber(arg3)
         if castSpellID then
-            local cached = estimateChargeStateFromCache(castSpellID)
-            if cached and cached.current and cached.max and numberGT(cached.max, 1) then
-                local newCurrent = cached.current
+            local liveCharges = getSafeCharges(castSpellID)
+            local hasLiveChargeState = liveCharges and not liveCharges.unknown and liveCharges.current and liveCharges.max
+            if hasLiveChargeState then
+                cacheChargeState(castSpellID, liveCharges)
+            end
+
+            local cachedCharges = nil
+            if not hasLiveChargeState then
+                cachedCharges = estimateChargeStateFromCache(castSpellID)
+            end
+            if cachedCharges and cachedCharges.current and cachedCharges.max and numberGT(cachedCharges.max, 1) then
+                local newCurrent = cachedCharges.current
                 if numberGT(newCurrent, 0) then
                     newCurrent = newCurrent - 1
                 end
                 local patch = {
                     current = newCurrent,
-                    max = cached.max,
+                    max = cachedCharges.max,
+                    chargeModRate = cachedCharges.chargeModRate,
                     chargeTime = getNowTime(),
                 }
-                if newCurrent < cached.max then
-                    patch.rechargeDuration = cached.rechargeDuration
+                if newCurrent < cachedCharges.max then
+                    patch.rechargeDuration = cachedCharges.rechargeDuration
                     patch.rechargeStart = getNowTime()
                 else
                     patch.rechargeStart = nil
                     patch.rechargeDuration = nil
                 end
                 updateCachedGlowState(castSpellID, patch)
+            end
+
+            if isLifeCocoonSpell(castSpellID) then
+                local cocoonState = {
+                    current = 0,
+                    max = 1,
+                    chargeTime = getNowTime(),
+                    cooldownReady = false,
+                    lastSpendTime = getNowTime(),
+                }
+                if liveCharges and liveCharges.rechargeDuration then
+                    cocoonState.rechargeDuration = liveCharges.rechargeDuration
+                    cocoonState.chargeModRate = liveCharges.chargeModRate
+                end
+                if cocoonState.rechargeDuration then
+                    cocoonState.rechargeStart = getNowTime()
+                end
+                updateCachedGlowState(castSpellID, cocoonState)
             end
         end
     end

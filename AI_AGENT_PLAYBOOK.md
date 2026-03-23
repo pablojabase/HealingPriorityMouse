@@ -171,6 +171,12 @@ Next-session execution guidance:
 3. Validate Cocoon against both combat entry and cooldown transition moments.
 4. Keep release workflow aligned with user preference: fast push to `master`, usually no tags unless explicitly requested.
 
+Latest untagged hotfix direction (March 22, 2026 late session):
+
+- `Renewing Mist` charge refresh now also listens for `SPELL_UPDATE_CHARGES`.
+- Charge cache estimation now stores `chargeModRate` and keeps cache state long enough to estimate full recharge to cap.
+- `Life Cocoon` now gets an immediate post-cast guard plus cached spent-state write so combat cooldown transitions bias closed instead of staying falsely visible.
+
 ## 9) Bootstrap Prompt for New Conversations
 
 Use/paste this into a fresh AI chat:

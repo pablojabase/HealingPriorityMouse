@@ -10,6 +10,11 @@ All notable changes to this project are documented in this file.
 ### Changed
 - Introduced `SPELL_POLICIES`-driven core entry evaluation so major healer spells can be migrated toward clearer spell-specific behavior without expanding shared readiness semantics everywhere.
 - Moved core spec recommendation assembly off the large per-spec branch block and onto policy evaluation while keeping dedicated overrides for high-regression spells such as `Renewing Mist` and `Life Cocoon`.
+- Extended charge cache handling to retain enough state for full recharge estimation and to respect `chargeModRate` when estimating missing charges.
+
+### Fixed
+- Refreshed charge-driven updates on `SPELL_UPDATE_CHARGES` so `Renewing Mist` charge overlays and max-charge cues do not lag behind gained charges.
+- Hardened `Life Cocoon` combat cooldown handling by marking the spell spent immediately on cast and preferring charge/cooldown evidence that keeps the icon hidden until the cooldown really returns.
 
 ## [1.0.14] - 2026-03-22
 
