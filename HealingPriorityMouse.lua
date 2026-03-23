@@ -226,7 +226,7 @@ local function estimateChargeStateFromCache(spellID)
 
     local current = state.current
     local max = state.max
-    if not (current and max and gt(max, 1)) then
+    if not (current and max and gt(max, 0)) then
         return state
     end
 
@@ -1559,9 +1559,17 @@ local function isLifeCocoonReady(spellID)
         return determinedReady
     end
 
-    local cachedChargeState = getRecentChargeState(spellID)
-    if cachedChargeState and cachedChargeState.current and numberLE(cachedChargeState.current, 0) then
-        return false
+    local estimatedChargeState = estimateChargeStateFromCache(spellID)
+    if estimatedChargeState and estimatedChargeState.current and estimatedChargeState.max then
+        if numberLE(estimatedChargeState.current, 0) then
+            return false
+        end
+        if numberGE(estimatedChargeState.max, 1) and numberGT(estimatedChargeState.current, 0) then
+            updateCachedGlowState(spellID, {
+                cooldownReady = true,
+            })
+            return true
+        end
     end
 
     if cached and cached.cooldownReady ~= nil then

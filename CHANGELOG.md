@@ -15,6 +15,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - Refreshed charge-driven updates on `SPELL_UPDATE_CHARGES` so `Renewing Mist` charge overlays and max-charge cues do not lag behind gained charges.
 - Hardened `Life Cocoon` combat cooldown handling by marking the spell spent immediately on cast and preferring charge/cooldown evidence that keeps the icon hidden until the cooldown really returns.
+- Fixed `Life Cocoon` staying hidden through the rest of combat after recharging by allowing single-charge cached recharge state to estimate back to ready in combat.
 
 ## [1.0.14] - 2026-03-22
 
