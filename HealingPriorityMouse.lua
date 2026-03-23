@@ -24,6 +24,8 @@ local debugLogWindow
 local debugLogScroll
 local debugLogEditBox
 local lastLiveLogSignature
+local minimapButton
+local MINIMAP_ICON_SPELL_ID = 2061
 
 local function getLogTimestamp()
     if date then
@@ -3165,6 +3167,63 @@ local function openOptionsFrame()
     frame:Raise()
 end
 
+local function createMinimapButton()
+    if minimapButton or not Minimap then
+        return minimapButton
+    end
+
+    local button = CreateFrame("Button", "HealingPriorityMouseMinimapButton", Minimap)
+    button:SetSize(31, 31)
+    button:SetFrameStrata("MEDIUM")
+    button:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -2, 2)
+    button:RegisterForClicks("LeftButtonUp")
+
+    local background = button:CreateTexture(nil, "BACKGROUND")
+    background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    background:SetSize(20, 20)
+    background:SetPoint("CENTER")
+    button.background = background
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(20, 20)
+    icon:SetPoint("CENTER")
+    icon:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.icon = icon
+
+    local border = button:CreateTexture(nil, "OVERLAY")
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    border:SetSize(54, 54)
+    border:SetPoint("TOPLEFT")
+    button.border = border
+
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    highlight:SetBlendMode("ADD")
+    highlight:SetSize(52, 52)
+    highlight:SetPoint("CENTER", 0, 1)
+    button.highlight = highlight
+
+    button:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton == "LeftButton" then
+            openOptionsFrame()
+        end
+    end)
+
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("HealingPriorityMouse")
+        GameTooltip:AddLine("Left-click: Open options", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    minimapButton = button
+    return minimapButton
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -3186,6 +3245,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         copyDefaults(HealingPriorityMouseDB, defaults)
         sanitizeCustomTrackedSpellsInDB()
         ensureDefaultTrackedSpellsForActiveSpec()
+        createMinimapButton()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
@@ -3264,6 +3324,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
         ensureDefaultTrackedSpellsForActiveSpec()
         refreshOptionsControls()
+        createMinimapButton()
     end
 
     refresh()
