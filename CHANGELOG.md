@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.15-beta.2] - 2026-03-22
+
 ### Added
 - Added `/hpm apidump <spellID> [moreSpellIDs]` to print grouped API diagnostics for cooldown, charges, duration object, and addon-side readiness/cache state in one pass.
 
