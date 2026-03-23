@@ -1562,20 +1562,35 @@ local function isPowerWordShieldSpell(spellID)
         return false
     end
 
-    local resolved = resolveSpellID("PowerWordShield")
-    if resolved and spellID == resolved then
+    local baseSpellID = (SPELLS.PowerWordShield and SPELLS.PowerWordShield[1]) or 17
+    if spellID == baseSpellID then
         return true
     end
 
-    for _, candidate in ipairs(SPELLS.PowerWordShield or {}) do
-        if candidate == spellID then
+    if FindBaseSpellByID then
+        local okBase, base = pcall(FindBaseSpellByID, spellID)
+        local baseNumber = plainNumber(base)
+        if okBase and baseNumber and baseNumber == baseSpellID then
             return true
         end
     end
 
-    local resolvedName = getSpellName(resolved or 17)
-    local spellName = getSpellName(spellID)
-    if resolvedName and spellName and resolvedName == spellName then
+    local activeSpellID = nil
+    if C_Spell and C_Spell.GetOverrideSpell then
+        local okOverride, overrideSpellID = pcall(C_Spell.GetOverrideSpell, baseSpellID)
+        local overrideNumber = plainNumber(overrideSpellID)
+        if okOverride and overrideNumber and overrideNumber > 0 then
+            activeSpellID = overrideNumber
+        end
+    end
+    if not activeSpellID and FindSpellOverrideByID then
+        local okOverride, overrideSpellID = pcall(FindSpellOverrideByID, baseSpellID)
+        local overrideNumber = plainNumber(overrideSpellID)
+        if okOverride and overrideNumber and overrideNumber > 0 then
+            activeSpellID = overrideNumber
+        end
+    end
+    if activeSpellID and spellID == activeSpellID then
         return true
     end
 
@@ -1615,6 +1630,7 @@ end
 local function getPowerWordShieldCacheKeys(spellID)
     local keys = {}
     local seen = {}
+    local baseSpellID = (SPELLS.PowerWordShield and SPELLS.PowerWordShield[1]) or 17
 
     local function addKey(value)
         if not value or seen[value] then
@@ -1624,10 +1640,20 @@ local function getPowerWordShieldCacheKeys(spellID)
         keys[#keys + 1] = value
     end
 
-    addKey(resolveSpellID("PowerWordShield"))
+    addKey(baseSpellID)
     addKey(spellID)
-    for _, candidate in ipairs(SPELLS.PowerWordShield or {}) do
-        addKey(candidate)
+
+    if FindBaseSpellByID and spellID then
+        local okBase, base = pcall(FindBaseSpellByID, spellID)
+        addKey(plainNumber(base))
+    end
+
+    if C_Spell and C_Spell.GetOverrideSpell then
+        local okOverride, overrideSpellID = pcall(C_Spell.GetOverrideSpell, baseSpellID)
+        addKey(plainNumber(overrideSpellID))
+    elseif FindSpellOverrideByID then
+        local okOverride, overrideSpellID = pcall(FindSpellOverrideByID, baseSpellID)
+        addKey(plainNumber(overrideSpellID))
     end
 
     return keys
@@ -1732,10 +1758,29 @@ local function getPowerWordShieldCachedCooldownEndTime(state)
 end
 
 local function readPowerWordShieldLiveCooldownState(spellID)
+    local activeSpellID = spellID
+    local baseSpellID = (SPELLS.PowerWordShield and SPELLS.PowerWordShield[1]) or 17
+    if C_Spell and C_Spell.GetOverrideSpell then
+        local okOverride, overrideSpellID = pcall(C_Spell.GetOverrideSpell, baseSpellID)
+        local overrideNumber = plainNumber(overrideSpellID)
+        if okOverride and overrideNumber and overrideNumber > 0 then
+            activeSpellID = overrideNumber
+        end
+    elseif FindSpellOverrideByID then
+        local okOverride, overrideSpellID = pcall(FindSpellOverrideByID, baseSpellID)
+        local overrideNumber = plainNumber(overrideSpellID)
+        if okOverride and overrideNumber and overrideNumber > 0 then
+            activeSpellID = overrideNumber
+        end
+    end
+    if not activeSpellID then
+        activeSpellID = spellID or baseSpellID
+    end
+
     local now = getNowTime()
 
     if C_Spell and C_Spell.GetSpellCooldownDuration then
-        local okDuration, durationObject = pcall(C_Spell.GetSpellCooldownDuration, spellID)
+        local okDuration, durationObject = pcall(C_Spell.GetSpellCooldownDuration, activeSpellID)
         if okDuration and durationObject then
             local remaining = getPowerWordShieldDurationObjectValue(durationObject, "GetRemainingDuration")
             local startTime = getPowerWordShieldDurationObjectValue(durationObject, "GetStartTime")
@@ -1770,7 +1815,7 @@ local function readPowerWordShieldLiveCooldownState(spellID)
     end
 
     if C_Spell and C_Spell.GetSpellCooldown then
-        local okCooldown, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        local okCooldown, info = pcall(C_Spell.GetSpellCooldown, activeSpellID)
         if okCooldown and type(info) == "table" and not isFalseFlag(info.isEnabled, false) then
             local startTime = plainNumber(info.startTime)
             local duration = plainNumber(info.duration)
@@ -1821,7 +1866,7 @@ local function readPowerWordShieldLiveCooldownState(spellID)
     end
 
     if GetSpellCooldown then
-        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
+        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, activeSpellID)
         if okLegacy and enabled ~= 0 then
             local startN = plainNumber(startTime)
             local durationN = plainNumber(duration)
