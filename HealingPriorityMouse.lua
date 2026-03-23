@@ -1752,6 +1752,315 @@ local function dumpSpellAPIDiagnostics(spellID)
     return true
 end
 
+local SPELL_POLICIES = {
+    Lifebloom = {
+        label = "Lifebloom",
+        condition = "groupAuraBelowThreshold",
+        fromPlayerOnly = true,
+        threshold = function()
+            return getLifebloomTargetThreshold()
+        end,
+    },
+    CenarionWard = {
+        label = "Cenarion Ward",
+        condition = "auraMissingOnMouseover",
+        readiness = "cooldown",
+        requireMouseover = true,
+    },
+    Consecration = {
+        label = "Consecration",
+        condition = "playerAuraMissing",
+        readiness = "cooldown",
+        auraKey = "ConsecrationAura",
+    },
+    InfusionOfLight = {
+        label = "Infusion of Light",
+        condition = "playerAuraActive",
+    },
+    HolyBulwark = {
+        label = "Holy Bulwark",
+        condition = "playerAuraMissing",
+        readiness = "cooldown",
+    },
+    RenewingMist = {
+        label = "Renewing Mist",
+        condition = "chargeOrAuraMissingOnMouseover",
+        readiness = "renewingMist",
+        glowRule = "RenewingMist",
+    },
+    StrengthOfTheBlackOx = {
+        label = "Strength of the Black Ox",
+        condition = "playerAuraActive",
+    },
+    WaterShield = {
+        label = "Water Shield",
+        condition = "playerAuraMissing",
+        readiness = "cooldown",
+    },
+    HealingStreamTotem = {
+        label = "Healing Stream Totem",
+        condition = "totemInactive",
+        readiness = "cooldown",
+    },
+    HealingRain = {
+        label = "Healing Rain",
+        condition = "readyAlways",
+        readiness = "cooldown",
+    },
+    Riptide = {
+        label = "Riptide",
+        condition = "chargeOrAuraMissingOnMouseover",
+        readiness = "chargeOrCooldown",
+    },
+    CloudburstTotem = {
+        label = "Cloudburst Totem",
+        condition = "readyAlways",
+        readiness = "cooldown",
+    },
+    Reversion = {
+        label = "Reversion",
+        condition = "reversionCoverage",
+        readiness = "chargeOrCooldown",
+    },
+    Echo = {
+        label = "Echo",
+        condition = "readyAlways",
+        readiness = "cooldown",
+        essenceMin = 2,
+    },
+    Lifespark = {
+        label = "Lifespark",
+        condition = "playerAuraActive",
+    },
+    Atonement = {
+        label = "Atonement",
+        condition = "counterAlways",
+        fromPlayerOnly = true,
+        iconCount = function(_, spellID, policy)
+            local count = countAuraInGroup(spellID, policy.fromPlayerOnly)
+            return tostring(count)
+        end,
+    },
+    PowerWordShield = {
+        label = "Power Word: Shield",
+        condition = "auraMissingOnMouseover",
+        readiness = "chargeOrCooldown",
+    },
+    PowerWordRadiance = {
+        label = "Power Word: Radiance",
+        condition = "readyAlways",
+        readiness = "chargeOrCooldown",
+        glowRule = "PowerWordRadiance",
+    },
+    Penance = {
+        label = "Penance",
+        condition = "readyAlways",
+        readiness = "chargeOrCooldown",
+        glowRule = "Penance",
+    },
+    PrayerOfMending = {
+        label = "Prayer of Mending",
+        condition = "auraMissingOnMouseover",
+        readiness = "cooldown",
+    },
+    Halo = {
+        label = "Halo",
+        condition = "readyAlways",
+        readiness = "cooldown",
+    },
+    Lightweaver = {
+        label = "Lightweaver",
+        condition = "playerAuraActive",
+        glowRule = "Lightweaver",
+        glowContext = function(_, spellID)
+            return {
+                stackCount = getAuraStackCountSafe("player", spellID, true, true),
+            }
+        end,
+    },
+    Premonitions = {
+        label = "Premonitions",
+        condition = "readyAlways",
+        readiness = "cooldown",
+    },
+}
+
+local function getPolicyValue(value, context, spellID, policy)
+    if type(value) == "function" then
+        return value(context, spellID, policy)
+    end
+    return value
+end
+
+local function resolvePolicySpellID(policyKey, policy)
+    if policy and policy.resolveAnyKeys then
+        return resolveAnySpellID(policy.resolveAnyKeys)
+    end
+    if policy and policy.resolveKey then
+        return resolveSpellID(policy.resolveKey)
+    end
+    return resolveSpellID(policyKey)
+end
+
+local function resolvePolicyAuraSpellID(policyKey, policy, spellID)
+    if policy and policy.auraKey then
+        return resolveSpellID(policy.auraKey) or spellID
+    end
+    if policy and policy.auraSpellID then
+        return policy.auraSpellID or spellID
+    end
+    return spellID or resolveSpellID(policyKey)
+end
+
+local function isSpellReadyForPolicy(policyKey, policy, spellID)
+    local readiness = policy and policy.readiness
+    if readiness == nil then
+        return true
+    end
+    if readiness == "cooldown" then
+        return getCooldownReadyByTimer(spellID, true)
+    end
+    if readiness == "cooldownStrict" then
+        return getCooldownReadyByTimer(spellID, false)
+    end
+    if readiness == "chargeOrCooldown" then
+        return hasAvailableChargeOrReady(spellID)
+    end
+    if readiness == "chargeOrCooldownStrict" then
+        return hasAvailableChargeOrReadyStrict(spellID)
+    end
+    if readiness == "renewingMist" then
+        return isRenewingMistReady(spellID)
+    end
+    if readiness == "lifeCocoon" then
+        return isLifeCocoonReady(spellID)
+    end
+    return getCooldownReadyByTimer(spellID, true)
+end
+
+local function getSpellPolicyBySpellID(spellID)
+    if not spellID then
+        return nil, nil
+    end
+    for policyKey, policy in pairs(SPELL_POLICIES) do
+        local resolved = resolvePolicySpellID(policyKey, policy)
+        if resolved and resolved == spellID then
+            return policyKey, policy
+        end
+    end
+    return nil, nil
+end
+
+local function evaluateSpellPolicy(policyKey, context, addEntry)
+    local policy = SPELL_POLICIES[policyKey]
+    if not policy then
+        return false
+    end
+
+    local spellID = resolvePolicySpellID(policyKey, policy)
+    if not spellID then
+        return false
+    end
+
+    local auraSpellID = resolvePolicyAuraSpellID(policyKey, policy, spellID)
+    local label = getPolicyValue(policy.label, context, spellID, policy) or getSpellName(spellID) or policyKey
+    local glowRule = getPolicyValue(policy.glowRule, context, spellID, policy)
+    local glowContext = getPolicyValue(policy.glowContext, context, spellID, policy)
+    local iconCount = getPolicyValue(policy.iconCount, context, spellID, policy)
+    local ready = isSpellReadyForPolicy(policyKey, policy, spellID)
+
+    if policy.essenceMin and getEssenceCount() < policy.essenceMin then
+        return false
+    end
+
+    if policy.condition == "groupAuraBelowThreshold" then
+        local threshold = getPolicyValue(policy.threshold, context, spellID, policy) or 1
+        local count = countAuraInGroup(auraSpellID, policy.fromPlayerOnly ~= false)
+        if count < threshold then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "auraMissingOnMouseover" then
+        if not ready then
+            return false
+        end
+        if policy.requireMouseover then
+            if not context.mouseover then
+                return false
+            end
+            if not isAuraActive(context.mouseover, auraSpellID, true, true) then
+                return addEntry(label, spellID, iconCount, glowRule, glowContext)
+            end
+            return false
+        end
+        if isAuraMissingOnMouseover(auraSpellID) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "playerAuraMissing" then
+        if ready and not isAuraActive("player", auraSpellID, true, true) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "playerAuraActive" then
+        if isAuraActive("player", auraSpellID, true, true) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "readyAlways" then
+        if ready then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "chargeOrAuraMissingOnMouseover" then
+        if ready and (isSpellAtMaxCharges(spellID) or isAuraMissingOnMouseover(auraSpellID)) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "totemInactive" then
+        if ready and not isPlayerTotemActive(spellID) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "reversionCoverage" then
+        if not ready then
+            return false
+        end
+        if context.mouseover then
+            if isSpellAtMaxCharges(spellID) or not isAuraActive(context.mouseover, auraSpellID, true, true) then
+                return addEntry(label, spellID, iconCount, glowRule, glowContext)
+            end
+            return false
+        end
+        local alive = countAliveGroupUnits()
+        local active = countAuraInGroup(auraSpellID, true)
+        if active < alive then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "counterAlways" then
+        return addEntry(label, spellID, iconCount, glowRule, glowContext)
+    end
+
+    return false
+end
+
 local function buildEntries()
     local specID = getSpecID()
     if not specID then
@@ -1798,145 +2107,22 @@ local function buildEntries()
         return true
     end
 
-    if specID == 105 then
-        local lifebloomID = resolveSpellID("Lifebloom")
-        local lbCount = lifebloomID and countAuraInGroup(lifebloomID, true) or 0
-        local threshold = getLifebloomTargetThreshold()
-        if lifebloomID and lbCount < threshold then
-            addEntry("Lifebloom", lifebloomID)
-        end
-        local cenWardID = resolveSpellID("CenarionWard")
-        if mouseover and cenWardID and getCooldownReadyByTimer(cenWardID)
-            and not isAuraActive(mouseover, cenWardID, true, true) then
-            addEntry("Cenarion Ward", cenWardID)
-        end
-    elseif specID == 65 then
-        local consecrationID = resolveSpellID("Consecration")
-        local consecrationAuraID = resolveSpellID("ConsecrationAura")
-        if consecrationID and getCooldownReadyByTimer(consecrationID)
-            and (not consecrationAuraID or not isAuraActive("player", consecrationAuraID, true, true)) then
-            addEntry("Consecration", consecrationID)
-        end
-        local infusionID = resolveSpellID("InfusionOfLight")
-        if infusionID and isAuraActive("player", infusionID, true, true) then
-            addEntry("Infusion of Light", infusionID)
-        end
-        local holyBulwarkID = resolveSpellID("HolyBulwark")
-        if holyBulwarkID and getCooldownReadyByTimer(holyBulwarkID)
-            and not isAuraActive("player", holyBulwarkID, true, true) then
-            addEntry("Holy Bulwark", holyBulwarkID)
-        end
-    elseif specID == 270 then
-        local renewingMistID = resolveSpellID("RenewingMist")
-        if renewingMistID and isRenewingMistReady(renewingMistID)
-            and (isSpellAtMaxCharges(renewingMistID) or isAuraMissingOnMouseover(renewingMistID)) then
-            addEntry("Renewing Mist", renewingMistID, nil, "RenewingMist")
-        end
-        local blackOxID = resolveSpellID("StrengthOfTheBlackOx")
-        if blackOxID and isAuraActive("player", blackOxID, true, true) then
-            addEntry("Strength of the Black Ox", blackOxID)
-        end
-    elseif specID == 264 then
-        local waterShieldID = resolveSpellID("WaterShield")
-        if waterShieldID and not isAuraActive("player", waterShieldID, true, true) and getCooldownReadyByTimer(waterShieldID) then
-            addEntry("Water Shield", waterShieldID)
-        end
-        local healingStreamTotemID = resolveSpellID("HealingStreamTotem")
-        if healingStreamTotemID and getCooldownReadyByTimer(healingStreamTotemID) and not isPlayerTotemActive(healingStreamTotemID) then
-            addEntry("Healing Stream Totem", healingStreamTotemID)
-        end
-        local healingRainID = resolveSpellID("HealingRain")
-        if healingRainID and getCooldownReadyByTimer(healingRainID) then
-            addEntry("Healing Rain", healingRainID)
-        end
-        local riptideID = resolveSpellID("Riptide")
-        if riptideID and hasAvailableChargeOrReady(riptideID)
-            and (isSpellAtMaxCharges(riptideID) or isAuraMissingOnMouseover(riptideID)) then
-            addEntry("Riptide", riptideID)
-        end
-        local cloudburstID = resolveSpellID("CloudburstTotem")
-        if cloudburstID and getCooldownReadyByTimer(cloudburstID) then
-            addEntry("Cloudburst Totem", cloudburstID)
-        end
-    elseif specID == 1468 then
-        local reversionID = resolveSpellID("Reversion")
-        if reversionID and hasAvailableChargeOrReady(reversionID) then
-            if mouseover then
-                if isSpellAtMaxCharges(reversionID) or not isAuraActive(mouseover, reversionID, true, true) then
-                    addEntry("Reversion", reversionID)
-                end
-            else
-                local alive = countAliveGroupUnits()
-                local activeReversions = countAuraInGroup(reversionID, true)
-                if activeReversions < alive then
-                    addEntry("Reversion", reversionID)
-                end
-            end
-        end
-        local echoID = resolveSpellID("Echo")
-        if echoID and getCooldownReadyByTimer(echoID) and getEssenceCount() >= 2 then
-            addEntry("Echo", echoID)
-        end
-        local lifesparkID = resolveSpellID("Lifespark")
-        if lifesparkID and isAuraActive("player", lifesparkID, true, true) then
-            addEntry("Lifespark", lifesparkID)
-        end
-    elseif specID == 256 then
-        local atonementID = resolveSpellID("Atonement")
-        local atonementCount = atonementID and countAuraInGroup(atonementID, true) or 0
-        local discHasEntry = false
-        if atonementID then
-            discHasEntry = addEntry("Atonement", atonementID, tostring(atonementCount)) or discHasEntry
-        end
-
-        local pwsID = resolveSpellID("PowerWordShield")
-        if pwsID and hasAvailableChargeOrReady(pwsID) and isAuraMissingOnMouseover(pwsID) then
-            discHasEntry = addEntry("Power Word: Shield", pwsID) or discHasEntry
-        end
-
-        local radianceID = resolveSpellID("PowerWordRadiance")
-        if radianceID and hasAvailableChargeOrReady(radianceID) then
-            discHasEntry = addEntry("Power Word: Radiance", radianceID, nil, "PowerWordRadiance") or discHasEntry
-        end
-
-        local penanceID = resolveSpellID("Penance")
-        if penanceID and hasAvailableChargeOrReady(penanceID) then
-            discHasEntry = addEntry("Penance", penanceID, nil, "Penance") or discHasEntry
-        end
-
-        if not discHasEntry and atonementID and not addedSpellIDs[atonementID] then
-            entries[#entries + 1] = {
-                name = "Atonement",
-                spellID = atonementID,
-                icon = getSpellTexture(atonementID) or 136243,
-                iconCount = tostring(atonementCount),
-            }
-            addedSpellIDs[atonementID] = true
-        end
-    elseif specID == 257 then
-        local pomID = resolveSpellID("PrayerOfMending")
-        if pomID and getCooldownReadyByTimer(pomID) and isAuraMissingOnMouseover(pomID) then
-            addEntry("Prayer of Mending", pomID)
-        end
-        local haloID = resolveSpellID("Halo")
-        if haloID and getCooldownReadyByTimer(haloID) then
-            addEntry("Halo", haloID)
-        end
-        local lightweaverID = resolveSpellID("Lightweaver")
-        if lightweaverID and isAuraActive("player", lightweaverID, true, true) then
-            local lightweaverStacks = getAuraStackCountSafe("player", lightweaverID, true, true)
-            addEntry("Lightweaver", lightweaverID, nil, "Lightweaver", { stackCount = lightweaverStacks })
-        end
-        local premonitionsReadyID = resolveAnySpellID({ "Premonitions" })
-        if premonitionsReadyID and getCooldownReadyByTimer(premonitionsReadyID) then
-            addEntry("Premonitions", premonitionsReadyID)
-        end
+    local corePolicyKeys = CORE_SPELL_KEYS_BY_SPEC[specID] or {}
+    local policyContext = {
+        specID = specID,
+        mouseover = mouseover,
+    }
+    for _, policyKey in ipairs(corePolicyKeys) do
+        evaluateSpellPolicy(policyKey, policyContext, addEntry)
     end
 
     local customSpells = getCustomTrackedSpells()
     for _, customSpellID in ipairs(customSpells) do
         local readyForCustomSpell = hasAvailableChargeOrReadyStrict(customSpellID)
-        if isLifeCocoonSpell(customSpellID) then
+        local customPolicyKey, customPolicy = getSpellPolicyBySpellID(customSpellID)
+        if customPolicy and (customPolicy.readiness == "renewingMist" or customPolicy.readiness == "lifeCocoon") then
+            readyForCustomSpell = isSpellReadyForPolicy(customPolicyKey, customPolicy, customSpellID)
+        elseif isLifeCocoonSpell(customSpellID) then
             readyForCustomSpell = isLifeCocoonReady(customSpellID)
         end
         if not isHandledByCoreSpecLogic(customSpellID)

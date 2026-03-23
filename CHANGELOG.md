@@ -7,6 +7,10 @@ All notable changes to this project are documented in this file.
 ### Added
 - Added `/hpm apidump <spellID> [moreSpellIDs]` to print grouped API diagnostics for cooldown, charges, duration object, and addon-side readiness/cache state in one pass.
 
+### Changed
+- Introduced `SPELL_POLICIES`-driven core entry evaluation so major healer spells can be migrated toward clearer spell-specific behavior without expanding shared readiness semantics everywhere.
+- Moved core spec recommendation assembly off the large per-spec branch block and onto policy evaluation while keeping dedicated overrides for high-regression spells such as `Renewing Mist` and `Life Cocoon`.
+
 ## [1.0.14] - 2026-03-22
 
 ### Added
