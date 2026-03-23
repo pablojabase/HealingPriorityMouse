@@ -1568,6 +1568,190 @@ local function hasAvailableChargeOrReadyStrict(spellID)
     return false
 end
 
+local function formatDiagnosticValue(value)
+    if value == nil then
+        return "nil"
+    end
+    if type(value) == "boolean" then
+        return value and "true" or "false"
+    end
+    return tostring(value)
+end
+
+local function appendDiagnosticField(parts, label, value)
+    parts[#parts + 1] = tostring(label) .. "=" .. formatDiagnosticValue(value)
+end
+
+local function emitDiagnosticLine(prefix, fields)
+    local parts = { prefix }
+    for _, field in ipairs(fields) do
+        parts[#parts + 1] = field
+    end
+    msg(table.concat(parts, " | "))
+end
+
+local function getDurationObjectValue(durationObject, methodName, ...)
+    if not durationObject then
+        return nil
+    end
+    local method = durationObject[methodName]
+    if type(method) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(method, durationObject, ...)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+local function dumpSpellAPIDiagnostics(spellID)
+    if not spellID then
+        return false
+    end
+
+    local spellName = getSpellName(spellID)
+    if not spellName or spellName == "" then
+        spellName = "unknown"
+    end
+
+    msg("apidump start -> " .. tostring(spellID) .. " (" .. tostring(spellName) .. ")")
+
+    local stateFields = {}
+    appendDiagnosticField(stateFields, "spellID", spellID)
+    appendDiagnosticField(stateFields, "name", spellName)
+    appendDiagnosticField(stateFields, "known", isSpellKnownSafe(spellID))
+    appendDiagnosticField(stateFields, "usable", isSpellUsableSafe(spellID))
+    appendDiagnosticField(stateFields, "resourceUsable", isSpellResourceUsableSafe(spellID))
+    appendDiagnosticField(stateFields, "inCombat", InCombatLockdown and InCombatLockdown() or false)
+    emitDiagnosticLine("apidump state", stateFields)
+
+    local cooldownInfo
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local ok, result = pcall(C_Spell.GetSpellCooldown, spellID)
+        if ok and type(result) == "table" then
+            cooldownInfo = result
+        end
+    end
+
+    local cooldownFields = {}
+    appendDiagnosticField(cooldownFields, "startTime", cooldownInfo and cooldownInfo.startTime)
+    appendDiagnosticField(cooldownFields, "duration", cooldownInfo and cooldownInfo.duration)
+    appendDiagnosticField(cooldownFields, "isEnabled", cooldownInfo and cooldownInfo.isEnabled)
+    appendDiagnosticField(cooldownFields, "modRate", cooldownInfo and cooldownInfo.modRate)
+    appendDiagnosticField(cooldownFields, "isOnGCD", cooldownInfo and cooldownInfo.isOnGCD)
+    appendDiagnosticField(cooldownFields, "activeCategory", cooldownInfo and cooldownInfo.activeCategory)
+    appendDiagnosticField(cooldownFields, "timeUntilEndOfStartRecovery", cooldownInfo and cooldownInfo.timeUntilEndOfStartRecovery)
+    emitDiagnosticLine("apidump cooldown", cooldownFields)
+
+    local legacyStartTime
+    local legacyDuration
+    local legacyEnabled
+    local legacyModRate
+    if GetSpellCooldown then
+        local ok, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
+        if ok then
+            legacyStartTime = startTime
+            legacyDuration = duration
+            legacyEnabled = enabled
+            legacyModRate = modRate
+        end
+    end
+
+    local legacyCooldownFields = {}
+    appendDiagnosticField(legacyCooldownFields, "startTime", legacyStartTime)
+    appendDiagnosticField(legacyCooldownFields, "duration", legacyDuration)
+    appendDiagnosticField(legacyCooldownFields, "enabled", legacyEnabled)
+    appendDiagnosticField(legacyCooldownFields, "modRate", legacyModRate)
+    emitDiagnosticLine("apidump legacyCooldown", legacyCooldownFields)
+
+    local chargeInfo = getSafeCharges(spellID)
+    local chargeFields = {}
+    appendDiagnosticField(chargeFields, "current", chargeInfo and chargeInfo.current)
+    appendDiagnosticField(chargeFields, "max", chargeInfo and chargeInfo.max)
+    appendDiagnosticField(chargeFields, "rechargeStart", chargeInfo and chargeInfo.rechargeStart)
+    appendDiagnosticField(chargeFields, "rechargeDuration", chargeInfo and chargeInfo.rechargeDuration)
+    appendDiagnosticField(chargeFields, "unknown", chargeInfo and chargeInfo.unknown)
+    emitDiagnosticLine("apidump charges", chargeFields)
+
+    local legacyCurrentCharges
+    local legacyMaxCharges
+    local legacyChargeStart
+    local legacyChargeDuration
+    local legacyChargeModRate
+    if GetSpellCharges then
+        local ok, currentCharges, maxCharges, chargeStart, chargeDuration, chargeModRate = pcall(GetSpellCharges, spellID)
+        if ok then
+            legacyCurrentCharges = currentCharges
+            legacyMaxCharges = maxCharges
+            legacyChargeStart = chargeStart
+            legacyChargeDuration = chargeDuration
+            legacyChargeModRate = chargeModRate
+        end
+    end
+
+    local legacyChargeFields = {}
+    appendDiagnosticField(legacyChargeFields, "current", legacyCurrentCharges)
+    appendDiagnosticField(legacyChargeFields, "max", legacyMaxCharges)
+    appendDiagnosticField(legacyChargeFields, "rechargeStart", legacyChargeStart)
+    appendDiagnosticField(legacyChargeFields, "rechargeDuration", legacyChargeDuration)
+    appendDiagnosticField(legacyChargeFields, "chargeModRate", legacyChargeModRate)
+    emitDiagnosticLine("apidump legacyCharges", legacyChargeFields)
+
+    local durationObject
+    if C_Spell and C_Spell.GetSpellCooldownDuration then
+        local ok, result = pcall(C_Spell.GetSpellCooldownDuration, spellID)
+        if ok then
+            durationObject = result
+        end
+    end
+
+    local durationFields = {}
+    appendDiagnosticField(durationFields, "startTime", getDurationObjectValue(durationObject, "GetStartTime"))
+    appendDiagnosticField(durationFields, "duration", getDurationObjectValue(durationObject, "GetDuration"))
+    appendDiagnosticField(durationFields, "remaining", getDurationObjectValue(durationObject, "GetRemainingDuration"))
+    appendDiagnosticField(durationFields, "modRate", getDurationObjectValue(durationObject, "GetModRate"))
+    emitDiagnosticLine("apidump durationObject", durationFields)
+
+    local readyFields = {}
+    appendDiagnosticField(readyFields, "readyShared", getCooldownReady(spellID))
+    appendDiagnosticField(readyFields, "readyTimerStrict", getCooldownReadyByTimer(spellID, false))
+    appendDiagnosticField(readyFields, "readyTimerFailOpen", getCooldownReadyByTimer(spellID, true))
+    appendDiagnosticField(readyFields, "readyCustomStrict", hasAvailableChargeOrReadyStrict(spellID))
+    appendDiagnosticField(readyFields, "atMaxCharges", isSpellAtMaxCharges(spellID))
+    if resolveSpellID("RenewingMist") == spellID then
+        appendDiagnosticField(readyFields, "readyRenewingMist", isRenewingMistReady(spellID))
+    end
+    if isLifeCocoonSpell(spellID) then
+        appendDiagnosticField(readyFields, "readyLifeCocoon", isLifeCocoonReady(spellID))
+    end
+    emitDiagnosticLine("apidump readiness", readyFields)
+
+    local cached = getCachedGlowState(spellID)
+    local cachedFields = {}
+    appendDiagnosticField(cachedFields, "current", cached and cached.current)
+    appendDiagnosticField(cachedFields, "max", cached and cached.max)
+    appendDiagnosticField(cachedFields, "rechargeStart", cached and cached.rechargeStart)
+    appendDiagnosticField(cachedFields, "rechargeDuration", cached and cached.rechargeDuration)
+    appendDiagnosticField(cachedFields, "chargeTime", cached and cached.chargeTime)
+    appendDiagnosticField(cachedFields, "cooldownReady", cached and cached.cooldownReady)
+    appendDiagnosticField(cachedFields, "shouldGlow", cached and cached.shouldGlow)
+    appendDiagnosticField(cachedFields, "stackCount", cached and cached.stackCount)
+    emitDiagnosticLine("apidump cache", cachedFields)
+
+    local estimated = estimateChargeStateFromCache(spellID)
+    local estimatedFields = {}
+    appendDiagnosticField(estimatedFields, "current", estimated and estimated.current)
+    appendDiagnosticField(estimatedFields, "max", estimated and estimated.max)
+    appendDiagnosticField(estimatedFields, "rechargeStart", estimated and estimated.rechargeStart)
+    appendDiagnosticField(estimatedFields, "rechargeDuration", estimated and estimated.rechargeDuration)
+    appendDiagnosticField(estimatedFields, "chargeTime", estimated and estimated.chargeTime)
+    emitDiagnosticLine("apidump estimated", estimatedFields)
+
+    msg("apidump end -> " .. tostring(spellID))
+    return true
+end
+
 local function buildEntries()
     local specID = getSpecID()
     if not specID then
@@ -2828,6 +3012,21 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
                 msg(key .. " -> missing on this client")
             end
         end
+        return
+    end
+
+    if cmd == "apidump" then
+        local foundAny = false
+        for token in string.gmatch(rest or "", "%d+") do
+            local spellID = tonumber(token)
+            if spellID and dumpSpellAPIDiagnostics(spellID) then
+                foundAny = true
+            end
+        end
+        if foundAny then
+            return
+        end
+        msg("usage: /hpm apidump <spellID> [moreSpellIDs]")
         return
     end
 

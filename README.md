@@ -26,3 +26,4 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm glow on|off`: toggle conditional icon glow highlights
 - `/hpm glowdebug on|off`: toggle glow condition debug messages
 - `/hpm audit`: verify which tracked spell IDs resolve on your current client build
+- `/hpm apidump <spellID> [moreSpellIDs]`: print cooldown/charges/duration-object diagnostics for one or more spells
