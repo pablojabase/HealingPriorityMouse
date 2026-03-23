@@ -1553,6 +1553,31 @@ local function isRenewingMistReady(spellID)
     return getCooldownReadyByTimer(spellID, true)
 end
 
+local function isPowerWordShieldSpell(spellID)
+    if not spellID then
+        return false
+    end
+
+    local resolved = resolveSpellID("PowerWordShield")
+    if resolved and spellID == resolved then
+        return true
+    end
+
+    for _, candidate in ipairs(SPELLS.PowerWordShield or {}) do
+        if candidate == spellID then
+            return true
+        end
+    end
+
+    local resolvedName = getSpellName(resolved or 17)
+    local spellName = getSpellName(spellID)
+    if resolvedName and spellName and resolvedName == spellName then
+        return true
+    end
+
+    return false
+end
+
 local function isLifeCocoonSpell(spellID)
     return spellID == LIFE_COCOON_SPELL_ID
 end
@@ -1646,6 +1671,88 @@ local function isLifeCocoonReady(spellID)
         return determinedReady
     end
 
+    local cachedTimerReady = getCachedRechargeTimerReady(cached)
+    if cachedTimerReady ~= nil then
+        updateCachedGlowState(spellID, {
+            cooldownReady = cachedTimerReady,
+        })
+        return cachedTimerReady
+    end
+
+    if cached and cached.cooldownReady ~= nil then
+        return cached.cooldownReady and true or false
+    end
+
+    return false
+end
+
+local function getDeterministicCooldownReady(spellID)
+    if not isSpellKnownSafe(spellID) then
+        return false
+    end
+
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if ok and info and not isFalseFlag(info.isEnabled, false) then
+            local startTime = plainNumber(info.startTime)
+            local duration = plainNumber(info.duration)
+            local modRate = plainNumber(info.modRate)
+            if not (modRate and numberGT(modRate, 0)) then
+                modRate = 1
+            end
+
+            if duration and numberLE(duration, 0) then
+                return true
+            end
+            if startTime and duration and numberGT(duration, 0) then
+                local now = getNowTime()
+                local effectiveDuration = duration / modRate
+                if numberLE((startTime + effectiveDuration), now + 0.05) then
+                    return true
+                end
+                return false
+            end
+        end
+    end
+
+    if GetSpellCooldown then
+        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
+        if okLegacy then
+            local startN = plainNumber(startTime)
+            local durationN = plainNumber(duration)
+            local modRateN = plainNumber(modRate)
+            if not (modRateN and numberGT(modRateN, 0)) then
+                modRateN = 1
+            end
+            if enabled ~= 0 then
+                if durationN and numberLE(durationN, 0) then
+                    return true
+                end
+                if startN and durationN and numberGT(durationN, 0) then
+                    local now = getNowTime()
+                    local effectiveDuration = durationN / modRateN
+                    if numberLE((startN + effectiveDuration), now + 0.05) then
+                        return true
+                    end
+                    return false
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function isPowerWordShieldReady(spellID)
+    local determinedReady = getDeterministicCooldownReady(spellID)
+    if determinedReady ~= nil then
+        updateCachedGlowState(spellID, {
+            cooldownReady = determinedReady,
+        })
+        return determinedReady
+    end
+
+    local cached = getCachedGlowState(spellID)
     local cachedTimerReady = getCachedRechargeTimerReady(cached)
     if cachedTimerReady ~= nil then
         updateCachedGlowState(spellID, {
@@ -2045,7 +2152,7 @@ local SPELL_POLICIES = {
     PowerWordShield = {
         label = "Power Word: Shield",
         condition = "readyAlways",
-        readiness = "cooldown",
+        readiness = "powerWordShield",
     },
     PowerWordRadiance = {
         label = "Power Word: Radiance",
@@ -2135,6 +2242,9 @@ local function isSpellReadyForPolicy(policyKey, policy, spellID)
     end
     if readiness == "lifeCocoon" then
         return isLifeCocoonReady(spellID)
+    end
+    if readiness == "powerWordShield" then
+        return isPowerWordShieldReady(spellID)
     end
     return getCooldownReadyByTimer(spellID, true)
 end
@@ -3256,6 +3366,34 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                     cocoonState.rechargeStart = getNowTime()
                 end
                 updateCachedGlowState(castSpellID, cocoonState)
+            end
+
+            if isPowerWordShieldSpell(castSpellID) then
+                local shieldCacheKey = resolveSpellID("PowerWordShield") or castSpellID
+                local cooldownStart
+                local cooldownDuration
+                local cooldownModRate
+                if C_Spell and C_Spell.GetSpellCooldown then
+                    local okCooldown, cooldownInfo = pcall(C_Spell.GetSpellCooldown, castSpellID)
+                    if okCooldown and type(cooldownInfo) == "table" then
+                        cooldownStart = plainNumber(cooldownInfo.startTime)
+                        cooldownDuration = plainNumber(cooldownInfo.duration)
+                        cooldownModRate = plainNumber(cooldownInfo.modRate)
+                    end
+                end
+                local shieldState = {
+                    cooldownReady = false,
+                    lastSpendTime = getNowTime(),
+                }
+                if cooldownDuration and numberGT(cooldownDuration, 0) then
+                    shieldState.rechargeStart = cooldownStart or getNowTime()
+                    shieldState.rechargeDuration = cooldownDuration
+                    shieldState.chargeModRate = cooldownModRate
+                end
+                updateCachedGlowState(shieldCacheKey, shieldState)
+                if shieldCacheKey ~= castSpellID then
+                    updateCachedGlowState(castSpellID, shieldState)
+                end
             end
         end
     end
