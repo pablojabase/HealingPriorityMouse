@@ -2044,9 +2044,8 @@ local SPELL_POLICIES = {
     },
     PowerWordShield = {
         label = "Power Word: Shield",
-        condition = "auraMissingOnMouseover",
-        readiness = "chargeOrCooldown",
-        requireMouseover = true,
+        condition = "readyAlways",
+        readiness = "cooldown",
     },
     PowerWordRadiance = {
         label = "Power Word: Radiance",

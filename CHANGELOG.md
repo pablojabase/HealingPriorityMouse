@@ -23,7 +23,7 @@ All notable changes to this project are documented in this file.
 - Fixed the remaining Lua scoping regression in the same charge-display resolver so it binds shared numeric helpers locally instead of falling back to missing globals.
 - Reworked custom tracked-spell management so the add/remove UI only manages user-added spells, not built-in core recommendation spells.
 - Tightened Discipline charge handling so `Penance` and `Power Word: Radiance` no longer remain visible with zero charges when charge payloads become fuzzy.
-- Tightened Discipline `Power Word: Shield` targeting so the icon only appears for an actual friendly mouseover target instead of treating no mouseover as a missing-shield signal.
+- Made Discipline `Power Word: Shield` target-independent again so its icon follows cooldown/readiness only, without reacting to current target or mouseover state.
 - Improved charge-spend cache updates for `Penance`, `Power Word: Radiance`, and other multi-charge spells so spent charges disappear immediately even when the live API lags behind the cast event.
 - Stopped cooldown swipe/countdown rendering for multi-charge spells such as `Power Word: Radiance` so the icon row does not show the classic cooldown clock overlay there.
 - Tightened cooldown end-time checks so spells like `Power Word: Shield` can reappear closer to Blizzard's own UI timing when cooldown payloads linger briefly.
