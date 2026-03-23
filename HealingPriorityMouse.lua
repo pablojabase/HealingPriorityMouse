@@ -235,6 +235,9 @@ local function estimateChargeStateFromCache(spellID)
     if not (rechargeStart and rechargeDuration and gt(rechargeDuration, 0)) then
         return state
     end
+    if le(rechargeStart, 0) then
+        return state
+    end
 
     local chargeModRate = state.chargeModRate
     if not (chargeModRate and gt(chargeModRate, 0)) then
@@ -1499,7 +1502,10 @@ local function getCachedRechargeTimerReady(state)
         return nil
     end
 
-    local rechargeStart = state.rechargeStart or state.lastSpendTime
+    local rechargeStart = state.rechargeStart
+    if not (rechargeStart and numberGT(rechargeStart, 0)) then
+        rechargeStart = state.lastSpendTime
+    end
     local rechargeDuration = state.rechargeDuration
     if not (rechargeStart and rechargeDuration and numberGT(rechargeDuration, 0)) then
         return nil

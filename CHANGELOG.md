@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file.
 - Hardened `Life Cocoon` combat cooldown handling by marking the spell spent immediately on cast and preferring charge/cooldown evidence that keeps the icon hidden until the cooldown really returns.
 - Fixed `Life Cocoon` staying hidden through the rest of combat after recharging by allowing single-charge cached recharge state to estimate back to ready in combat.
 - Tightened `Life Cocoon` dedicated combat fallback so cache/charge state only proves readiness when a stored cooldown timer has actually elapsed, reducing always-visible false positives.
+- Fixed `Life Cocoon` early combat reappearance caused by `rechargeStart=0` payloads being mistaken for an active elapsed timer.
 
 ## [1.0.14] - 2026-03-22
 
