@@ -150,6 +150,7 @@ local CHARGE_CACHE_TTL = 12.0
 local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 local updateCachedGlowState
+local getSafeCharges
 
 local function getNowTime()
     if GetTime then
@@ -554,7 +555,7 @@ local function isNodeRankActive(nodeInfo)
     return numberGT(ranksPurchased, 0) or numberGT(activeRank, 0)
 end
 
-local function getSafeCharges(spellID)
+getSafeCharges = function(spellID)
     if not (C_Spell and C_Spell.GetSpellCharges) then
         if GetSpellCharges then
             local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy, chargeModRateLegacy = pcall(GetSpellCharges, spellID)
