@@ -1494,6 +1494,29 @@ local function isLifeCocoonSpell(spellID)
     return spellID == LIFE_COCOON_SPELL_ID
 end
 
+local function getCachedRechargeTimerReady(state)
+    if not state then
+        return nil
+    end
+
+    local rechargeStart = state.rechargeStart or state.lastSpendTime
+    local rechargeDuration = state.rechargeDuration
+    if not (rechargeStart and rechargeDuration and numberGT(rechargeDuration, 0)) then
+        return nil
+    end
+
+    local chargeModRate = state.chargeModRate
+    if not (chargeModRate and numberGT(chargeModRate, 0)) then
+        chargeModRate = 1
+    end
+
+    local elapsed = (getNowTime() - rechargeStart) * chargeModRate
+    if numberGE(elapsed + 0.05, rechargeDuration) then
+        return true
+    end
+    return false
+end
+
 local function isLifeCocoonReady(spellID)
     local now = getNowTime()
     local cached = getCachedGlowState(spellID)
@@ -1546,8 +1569,6 @@ local function isLifeCocoonReady(spellID)
             cacheChargeState(spellID, charges)
             if numberLE(current, 0) then
                 determinedReady = false
-            elseif determinedReady == nil and numberGE(max, 1) and numberGT(current, 0) then
-                determinedReady = true
             end
         end
     end
@@ -1559,17 +1580,12 @@ local function isLifeCocoonReady(spellID)
         return determinedReady
     end
 
-    local estimatedChargeState = estimateChargeStateFromCache(spellID)
-    if estimatedChargeState and estimatedChargeState.current and estimatedChargeState.max then
-        if numberLE(estimatedChargeState.current, 0) then
-            return false
-        end
-        if numberGE(estimatedChargeState.max, 1) and numberGT(estimatedChargeState.current, 0) then
-            updateCachedGlowState(spellID, {
-                cooldownReady = true,
-            })
-            return true
-        end
+    local cachedTimerReady = getCachedRechargeTimerReady(cached)
+    if cachedTimerReady ~= nil then
+        updateCachedGlowState(spellID, {
+            cooldownReady = cachedTimerReady,
+        })
+        return cachedTimerReady
     end
 
     if cached and cached.cooldownReady ~= nil then
@@ -3105,6 +3121,17 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
 
             if isLifeCocoonSpell(castSpellID) then
+                local cooldownStart
+                local cooldownDuration
+                local cooldownModRate
+                if C_Spell and C_Spell.GetSpellCooldown then
+                    local okCooldown, cooldownInfo = pcall(C_Spell.GetSpellCooldown, castSpellID)
+                    if okCooldown and type(cooldownInfo) == "table" then
+                        cooldownStart = plainNumber(cooldownInfo.startTime)
+                        cooldownDuration = plainNumber(cooldownInfo.duration)
+                        cooldownModRate = plainNumber(cooldownInfo.modRate)
+                    end
+                end
                 local cocoonState = {
                     current = 0,
                     max = 1,
@@ -3112,11 +3139,15 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                     cooldownReady = false,
                     lastSpendTime = getNowTime(),
                 }
-                if liveCharges and liveCharges.rechargeDuration then
+                if cooldownDuration and numberGT(cooldownDuration, 0) then
+                    cocoonState.rechargeStart = cooldownStart or getNowTime()
+                    cocoonState.rechargeDuration = cooldownDuration
+                    cocoonState.chargeModRate = cooldownModRate
+                elseif liveCharges and liveCharges.rechargeDuration then
                     cocoonState.rechargeDuration = liveCharges.rechargeDuration
                     cocoonState.chargeModRate = liveCharges.chargeModRate
                 end
-                if cocoonState.rechargeDuration then
+                if cocoonState.rechargeDuration and not cocoonState.rechargeStart then
                     cocoonState.rechargeStart = getNowTime()
                 end
                 updateCachedGlowState(castSpellID, cocoonState)
