@@ -16,6 +16,7 @@ local defaults = {
     customTrackedSpells = {},
     customTrackedSpellsByCharacter = {},
     customTrackedSpecsInitializedByCharacter = {},
+    minimapButtonAngle = 225,
 }
 
 local DEV_LOG_MAX_LINES = 300
@@ -26,6 +27,8 @@ local debugLogEditBox
 local lastLiveLogSignature
 local minimapButton
 local MINIMAP_ICON_SPELL_ID = 2061
+local CUSTOM_MINIMAP_ICON_TEXTURE = "Interface\\AddOns\\HealingPriorityMouse\\Media\\MinimapIcon"
+local MINIMAP_BUTTON_RADIUS = 78
 
 local function getLogTimestamp()
     if date then
@@ -3167,6 +3170,85 @@ local function openOptionsFrame()
     frame:Raise()
 end
 
+local function applyConfiguredMinimapTexture(textureObject)
+    if not textureObject then
+        return
+    end
+
+    local customTexture = CUSTOM_MINIMAP_ICON_TEXTURE
+    if customTexture and customTexture ~= "" then
+        textureObject:SetTexture(customTexture)
+        if textureObject.GetTexture and textureObject:GetTexture() then
+            return
+        end
+    end
+
+    textureObject:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
+end
+
+local function updateMinimapButtonPosition()
+    if not (minimapButton and Minimap) then
+        return
+    end
+
+    local angle = tonumber(HealingPriorityMouseDB and HealingPriorityMouseDB.minimapButtonAngle) or 225
+    local radians = math.rad(angle)
+    local offsetX = math.cos(radians) * MINIMAP_BUTTON_RADIUS
+    local offsetY = math.sin(radians) * MINIMAP_BUTTON_RADIUS
+
+    minimapButton:ClearAllPoints()
+    minimapButton:SetPoint("CENTER", Minimap, "CENTER", offsetX, offsetY)
+end
+
+local function getMinimapCursorAngle()
+    if not (Minimap and GetCursorPosition and UIParent and UIParent.GetEffectiveScale) then
+        return nil
+    end
+
+    local minimapCenterX, minimapCenterY = Minimap:GetCenter()
+    if not (minimapCenterX and minimapCenterY) then
+        return nil
+    end
+
+    local scale = UIParent:GetEffectiveScale() or 1
+    local cursorX, cursorY = GetCursorPosition()
+    cursorX = cursorX / scale
+    cursorY = cursorY / scale
+
+    local deltaX = cursorX - minimapCenterX
+    local deltaY = cursorY - minimapCenterY
+    if deltaX == 0 and deltaY == 0 then
+        return nil
+    end
+
+    local angle
+    if math.atan2 then
+        angle = math.deg(math.atan2(deltaY, deltaX))
+    else
+        angle = math.deg(math.atan(deltaY / (deltaX == 0 and 0.0001 or deltaX)))
+        if deltaX < 0 then
+            angle = angle + 180
+        elseif deltaY < 0 then
+            angle = angle + 360
+        end
+    end
+
+    if angle < 0 then
+        angle = angle + 360
+    end
+    return angle
+end
+
+local function updateMinimapButtonDrag()
+    local angle = getMinimapCursorAngle()
+    if not angle then
+        return
+    end
+
+    HealingPriorityMouseDB.minimapButtonAngle = angle
+    updateMinimapButtonPosition()
+end
+
 local function createMinimapButton()
     if minimapButton or not Minimap then
         return minimapButton
@@ -3175,8 +3257,9 @@ local function createMinimapButton()
     local button = CreateFrame("Button", "HealingPriorityMouseMinimapButton", Minimap)
     button:SetSize(31, 31)
     button:SetFrameStrata("MEDIUM")
-    button:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -2, 2)
-    button:RegisterForClicks("LeftButtonUp")
+    button:SetClampedToScreen(true)
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:RegisterForDrag("RightButton")
 
     local background = button:CreateTexture(nil, "BACKGROUND")
     background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
@@ -3187,7 +3270,7 @@ local function createMinimapButton()
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetSize(20, 20)
     icon:SetPoint("CENTER")
-    icon:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
+    applyConfiguredMinimapTexture(icon)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     button.icon = icon
 
@@ -3209,11 +3292,19 @@ local function createMinimapButton()
             openOptionsFrame()
         end
     end)
+    button:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", updateMinimapButtonDrag)
+    end)
+    button:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+        updateMinimapButtonDrag()
+    end)
 
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("HealingPriorityMouse")
         GameTooltip:AddLine("Left-click: Open options", 1, 1, 1)
+        GameTooltip:AddLine("Right-drag: Move button", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function()
@@ -3221,6 +3312,7 @@ local function createMinimapButton()
     end)
 
     minimapButton = button
+    updateMinimapButtonPosition()
     return minimapButton
 end
 

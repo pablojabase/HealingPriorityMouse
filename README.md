@@ -7,7 +7,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 ## What It Does
 
 - Shows a compact icon row near your cursor for healer priorities.
-- Adds a minimap button for opening the in-game options window quickly.
+- Adds a movable minimap button for opening the in-game options window quickly.
 - Lets you add your own additional tracked spells from an in-game class spell dropdown (`Add` button + removable list).
 - Keeps custom tracked spell lists character-specific to avoid cross-character bleed.
 - Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) suitable for current patch lines.
@@ -28,3 +28,10 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm glowdebug on|off`: toggle glow condition debug messages
 - `/hpm audit`: verify which tracked spell IDs resolve on your current client build
 - `/hpm apidump <spellID> [moreSpellIDs]`: print cooldown/charges/duration-object diagnostics for one or more spells
+
+## Minimap Icon
+
+- Left-click the minimap button to open the options window.
+- Right-drag the minimap button to move it around the minimap edge.
+- To use a custom icon, place a square texture at `Interface/AddOns/HealingPriorityMouse/Media/MinimapIcon`.
+- The addon will try that custom texture first, then fall back to the built-in gold cross icon if the file is missing.
