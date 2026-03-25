@@ -28,7 +28,23 @@ local lastLiveLogSignature
 local minimapButton
 local MINIMAP_ICON_SPELL_ID = 2061
 local CUSTOM_MINIMAP_ICON_TEXTURE = "Interface\\AddOns\\HealingPriorityMouse\\Media\\MinimapIcon"
-local MINIMAP_BUTTON_RADIUS = 78
+local MINIMAP_BUTTON_RADIUS = 5
+local MINIMAP_SHAPES = {
+    ROUND = { true, true, true, true },
+    SQUARE = { false, false, false, false },
+    CORNER-TOPLEFT = { false, false, false, true },
+    CORNER-TOPRIGHT = { false, false, true, false },
+    CORNER-BOTTOMLEFT = { false, true, false, false },
+    CORNER-BOTTOMRIGHT = { true, false, false, false },
+    SIDE-LEFT = { false, true, false, true },
+    SIDE-RIGHT = { true, false, true, false },
+    SIDE-TOP = { false, false, true, true },
+    SIDE-BOTTOM = { true, true, false, false },
+    TRICORNER-TOPLEFT = { false, true, true, true },
+    TRICORNER-TOPRIGHT = { true, false, true, true },
+    TRICORNER-BOTTOMLEFT = { true, true, false, true },
+    TRICORNER-BOTTOMRIGHT = { true, true, true, false },
+}
 
 local function getLogTimestamp()
     if date then
@@ -3193,8 +3209,30 @@ local function updateMinimapButtonPosition()
 
     local angle = tonumber(HealingPriorityMouseDB and HealingPriorityMouseDB.minimapButtonAngle) or 225
     local radians = math.rad(angle)
-    local offsetX = math.cos(radians) * MINIMAP_BUTTON_RADIUS
-    local offsetY = math.sin(radians) * MINIMAP_BUTTON_RADIUS
+    local offsetX = math.cos(radians)
+    local offsetY = math.sin(radians)
+    local quadrant = 1
+    if offsetX < 0 then
+        quadrant = quadrant + 1
+    end
+    if offsetY > 0 then
+        quadrant = quadrant + 2
+    end
+
+    local minimapShape = GetMinimapShape and GetMinimapShape() or "ROUND"
+    local quadTable = MINIMAP_SHAPES[minimapShape] or MINIMAP_SHAPES.ROUND
+    local width = (Minimap:GetWidth() / 2) + MINIMAP_BUTTON_RADIUS
+    local height = (Minimap:GetHeight() / 2) + MINIMAP_BUTTON_RADIUS
+
+    if quadTable[quadrant] then
+        offsetX = offsetX * width
+        offsetY = offsetY * height
+    else
+        local diagonalWidth = math.sqrt(2 * (width ^ 2)) - 10
+        local diagonalHeight = math.sqrt(2 * (height ^ 2)) - 10
+        offsetX = math.max(-width, math.min(offsetX * diagonalWidth, width))
+        offsetY = math.max(-height, math.min(offsetY * diagonalHeight, height))
+    end
 
     minimapButton:ClearAllPoints()
     minimapButton:SetPoint("CENTER", Minimap, "CENTER", offsetX, offsetY)
@@ -3210,7 +3248,7 @@ local function getMinimapCursorAngle()
         return nil
     end
 
-    local scale = UIParent:GetEffectiveScale() or 1
+    local scale = Minimap:GetEffectiveScale() or 1
     local cursorX, cursorY = GetCursorPosition()
     cursorX = cursorX / scale
     cursorY = cursorY / scale
