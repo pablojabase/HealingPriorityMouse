@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file.
 ### Added
 - Added a minimap button that opens the in-game options window on left click, can be right-dragged around the minimap edge, and supports a custom texture file fallback.
 
+### Changed
+- Swapped minimap button interactions so left-drag moves the button and right-click opens the options window.
+
 ## [1.0.15-beta.2] - 2026-03-22
 
 ### Added

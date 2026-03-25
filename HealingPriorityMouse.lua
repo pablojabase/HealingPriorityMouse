@@ -3297,7 +3297,7 @@ local function createMinimapButton()
     button:SetFrameStrata("MEDIUM")
     button:SetClampedToScreen(true)
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    button:RegisterForDrag("RightButton")
+    button:RegisterForDrag("LeftButton")
 
     local background = button:CreateTexture(nil, "BACKGROUND")
     background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
@@ -3326,7 +3326,7 @@ local function createMinimapButton()
     button.highlight = highlight
 
     button:SetScript("OnClick", function(_, mouseButton)
-        if mouseButton == "LeftButton" then
+        if mouseButton == "RightButton" then
             openOptionsFrame()
         end
     end)
@@ -3341,8 +3341,8 @@ local function createMinimapButton()
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("HealingPriorityMouse")
-        GameTooltip:AddLine("Left-click: Open options", 1, 1, 1)
-        GameTooltip:AddLine("Right-drag: Move button", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Left-drag: Move button", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: Open options", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function()

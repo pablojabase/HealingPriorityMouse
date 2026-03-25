@@ -31,7 +31,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 
 ## Minimap Icon
 
-- Left-click the minimap button to open the options window.
-- Right-drag the minimap button to move it around the minimap edge.
+- Left-drag the minimap button to move it around the minimap edge.
+- Right-click the minimap button to open the options window.
 - To use a custom icon, place a square texture at `Interface/AddOns/HealingPriorityMouse/Media/MinimapIcon`.
 - The addon will try that custom texture first, then fall back to the built-in gold cross icon if the file is missing.
