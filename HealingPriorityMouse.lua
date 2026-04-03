@@ -184,6 +184,8 @@ local GROUP_AURA_REFRESH_INTERVAL = 0.12
 local lastGroupAuraRefresh = 0
 local updateCachedGlowState
 local getSafeCharges
+local plainNumber
+local numberGT
 
 local function getNowTime()
     if GetTime then
@@ -686,7 +688,7 @@ local function getFriendlyMouseover()
     return "mouseover"
 end
 
-local function plainNumber(value)
+plainNumber = function(value)
     local isNilOk, isNil = pcall(function()
         return value == nil
     end)
@@ -735,7 +737,7 @@ local function numberLE(value, limit)
     return ok and result or false
 end
 
-local function numberGT(value, limit)
+numberGT = function(value, limit)
     local ok, result = pcall(function()
         return value > limit
     end)
