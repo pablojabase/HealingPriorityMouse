@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "1.0.15-beta.2"
+local ADDON_VERSION = "2.0.0-beta.1"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -553,81 +553,557 @@ local function isNodeRankActive(nodeInfo)
     return numberGT(ranksPurchased, 0) or numberGT(activeRank, 0)
 end
 
-getSafeCharges = function(spellID)
-    if not (C_Spell and C_Spell.GetSpellCharges) then
-        if GetSpellCharges then
-            local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy, chargeModRateLegacy = pcall(GetSpellCharges, spellID)
-            if okLegacy then
-                local currentLegacyN = plainNumber(currentLegacy)
-                local maxLegacyN = plainNumber(maxLegacy)
-                local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
-                local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
-                local chargeModRateLegacyN = plainNumber(chargeModRateLegacy)
-                if currentLegacyN and maxLegacyN then
-                    return {
-                        current = currentLegacyN,
-                        max = maxLegacyN,
-                        rechargeStart = cooldownStartLegacyN,
-                        rechargeDuration = cooldownDurationLegacyN,
-                        chargeModRate = chargeModRateLegacyN,
-                        unknown = false,
-                    }
-                end
-            end
+local GCD_SPELL_ID = 61304
+local REAL_COOLDOWN_MIN_SECONDS = 2.0
+local spellRuntimeCache = {
+    cooldown = {},
+    charges = {},
+    cooldownDuration = {},
+    chargeDuration = {},
+    override = {},
+    bookOverride = {},
+    base = {},
+    bookBase = {},
+    state = {},
+}
+
+local function wipeTableKeys(tbl)
+    if type(tbl) ~= "table" then
+        return
+    end
+    for key in pairs(tbl) do
+        tbl[key] = nil
+    end
+end
+
+local function invalidateSpellRuntimeCache()
+    wipeTableKeys(spellRuntimeCache.cooldown)
+    wipeTableKeys(spellRuntimeCache.charges)
+    wipeTableKeys(spellRuntimeCache.cooldownDuration)
+    wipeTableKeys(spellRuntimeCache.chargeDuration)
+    wipeTableKeys(spellRuntimeCache.override)
+    wipeTableKeys(spellRuntimeCache.bookOverride)
+    wipeTableKeys(spellRuntimeCache.base)
+    wipeTableKeys(spellRuntimeCache.bookBase)
+    wipeTableKeys(spellRuntimeCache.state)
+end
+
+local function normalizeSpellID(value)
+    local numberValue = plainNumber(value)
+    if not numberValue then
+        return nil
+    end
+    local rounded = math.floor(numberValue + 0.5)
+    if not numberGT(rounded, 0) then
+        return nil
+    end
+    return rounded
+end
+
+local function getCachedSpellRuntimeValue(bucket, spellID, loader)
+    local normalizedSpellID = normalizeSpellID(spellID)
+    if not normalizedSpellID or type(bucket) ~= "table" then
+        return nil
+    end
+    local cached = bucket[normalizedSpellID]
+    if cached ~= nil then
+        return cached or nil
+    end
+    local value = loader(normalizedSpellID)
+    bucket[normalizedSpellID] = value or false
+    return value
+end
+
+local function fetchOverrideSpellID(spellID)
+    if not (C_Spell and C_Spell.GetOverrideSpell) then
+        return nil
+    end
+    local ok, overrideSpellID = pcall(C_Spell.GetOverrideSpell, spellID)
+    if ok then
+        return normalizeSpellID(overrideSpellID)
+    end
+    return nil
+end
+
+local function fetchBookOverrideSpellID(spellID)
+    if not (C_SpellBook and C_SpellBook.FindSpellOverrideByID) then
+        return nil
+    end
+    local ok, overrideSpellID = pcall(C_SpellBook.FindSpellOverrideByID, spellID)
+    if ok then
+        return normalizeSpellID(overrideSpellID)
+    end
+    return nil
+end
+
+local function fetchBaseSpellID(spellID)
+    if not (C_Spell and C_Spell.GetBaseSpell) then
+        return nil
+    end
+    local ok, baseSpellID = pcall(C_Spell.GetBaseSpell, spellID)
+    if ok then
+        return normalizeSpellID(baseSpellID)
+    end
+    return nil
+end
+
+local function fetchBookBaseSpellID(spellID)
+    if not (C_SpellBook and C_SpellBook.FindBaseSpellByID) then
+        return nil
+    end
+    local ok, baseSpellID = pcall(C_SpellBook.FindBaseSpellByID, spellID)
+    if ok then
+        return normalizeSpellID(baseSpellID)
+    end
+    return nil
+end
+
+local function addSpellCandidate(candidates, seen, spellID)
+    local normalizedSpellID = normalizeSpellID(spellID)
+    if not normalizedSpellID or seen[normalizedSpellID] then
+        return
+    end
+    seen[normalizedSpellID] = true
+    candidates[#candidates + 1] = normalizedSpellID
+end
+
+local function addRelatedSpellCandidates(candidates, seen, spellID)
+    local normalizedSpellID = normalizeSpellID(spellID)
+    if not normalizedSpellID then
+        return
+    end
+    addSpellCandidate(candidates, seen, normalizedSpellID)
+    addSpellCandidate(candidates, seen, getCachedSpellRuntimeValue(spellRuntimeCache.override, normalizedSpellID, fetchOverrideSpellID))
+    addSpellCandidate(candidates, seen, getCachedSpellRuntimeValue(spellRuntimeCache.bookOverride, normalizedSpellID, fetchBookOverrideSpellID))
+    addSpellCandidate(candidates, seen, getCachedSpellRuntimeValue(spellRuntimeCache.base, normalizedSpellID, fetchBaseSpellID))
+    addSpellCandidate(candidates, seen, getCachedSpellRuntimeValue(spellRuntimeCache.bookBase, normalizedSpellID, fetchBookBaseSpellID))
+end
+
+local function getSpellCandidateIDs(spellID)
+    local normalizedSpellID = normalizeSpellID(spellID)
+    if not normalizedSpellID then
+        return {}
+    end
+    local candidates = {}
+    local seen = {}
+    addRelatedSpellCandidates(candidates, seen, normalizedSpellID)
+
+    local index = 1
+    while index <= #candidates and index <= 12 do
+        addRelatedSpellCandidates(candidates, seen, candidates[index])
+        index = index + 1
+    end
+
+    return candidates
+end
+
+local function normalizeCooldownInfo(rawValue, rawDuration, rawEnabled, rawModRate)
+    if type(rawValue) == "table" then
+        local startTime = plainNumber(rawValue.startTime)
+        local duration = plainNumber(rawValue.duration)
+        local hasExplicitGCD = isTrueFlag(rawValue.isOnGCD, false)
+        if type(startTime) ~= "number" and type(duration) ~= "number" and not hasExplicitGCD then
+            return nil
         end
+
+        local modRate = plainNumber(rawValue.modRate)
+        if not (modRate and numberGT(modRate, 0)) then
+            modRate = 1
+        end
+
+        local isEnabled
+        if isTrueFlag(rawValue.isEnabled, false) then
+            isEnabled = true
+        elseif isFalseFlag(rawValue.isEnabled, false) then
+            isEnabled = false
+        end
+
+        return {
+            startTime = startTime or 0,
+            duration = duration or 0,
+            isEnabled = isEnabled,
+            modRate = modRate,
+            isOnGCD = hasExplicitGCD and true or nil,
+            activeCategory = plainNumber(rawValue.activeCategory),
+            timeUntilEndOfStartRecovery = plainNumber(rawValue.timeUntilEndOfStartRecovery),
+        }
+    end
+
+    local startTime = plainNumber(rawValue)
+    local duration = plainNumber(rawDuration)
+    if type(startTime) ~= "number" and type(duration) ~= "number" then
         return nil
     end
 
-    local ok, charges = pcall(C_Spell.GetSpellCharges, spellID)
-    if not ok or type(charges) ~= "table" then
-        return nil
+    local modRate = plainNumber(rawModRate)
+    if not (modRate and numberGT(modRate, 0)) then
+        modRate = 1
     end
 
-    local current = plainNumber(charges.currentCharges)
-    local max = plainNumber(charges.maxCharges)
-    local cooldownStart = plainNumber(charges.cooldownStartTime)
-    local cooldownDuration = plainNumber(charges.cooldownDuration)
-    local chargeModRate = plainNumber(charges.chargeModRate)
+    local isEnabled
+    if isTrueFlag(rawEnabled, false) then
+        isEnabled = true
+    elseif isFalseFlag(rawEnabled, false) then
+        isEnabled = false
+    end
 
-    if current and max then
+    return {
+        startTime = startTime or 0,
+        duration = duration or 0,
+        isEnabled = isEnabled,
+        modRate = modRate,
+        isOnGCD = nil,
+        activeCategory = nil,
+        timeUntilEndOfStartRecovery = nil,
+    }
+end
+
+local function normalizeChargesInfo(rawValue, rawMax, rawRechargeStart, rawRechargeDuration, rawChargeModRate)
+    if type(rawValue) == "table" then
+        local current = plainNumber(rawValue.currentCharges)
+        local max = plainNumber(rawValue.maxCharges)
+        if type(current) ~= "number" and type(max) ~= "number" then
+            return nil
+        end
+
+        local chargeModRate = plainNumber(rawValue.chargeModRate)
+        if not (chargeModRate and numberGT(chargeModRate, 0)) then
+            chargeModRate = 1
+        end
+
         return {
             current = current,
             max = max,
-            rechargeStart = cooldownStart,
-            rechargeDuration = cooldownDuration,
+            rechargeStart = plainNumber(rawValue.cooldownStartTime),
+            rechargeDuration = plainNumber(rawValue.cooldownDuration),
             chargeModRate = chargeModRate,
             unknown = false,
         }
     end
 
-    if GetSpellCharges then
-        local okLegacy, currentLegacy, maxLegacy, cooldownStartLegacy, cooldownDurationLegacy, chargeModRateLegacy = pcall(GetSpellCharges, spellID)
-        if okLegacy then
-            local currentLegacyN = plainNumber(currentLegacy)
-            local maxLegacyN = plainNumber(maxLegacy)
-            local cooldownStartLegacyN = plainNumber(cooldownStartLegacy)
-            local cooldownDurationLegacyN = plainNumber(cooldownDurationLegacy)
-            local chargeModRateLegacyN = plainNumber(chargeModRateLegacy)
-            if currentLegacyN and maxLegacyN then
-                return {
-                    current = currentLegacyN,
-                    max = maxLegacyN,
-                    rechargeStart = cooldownStartLegacyN,
-                    rechargeDuration = cooldownDurationLegacyN,
-                    chargeModRate = chargeModRateLegacyN,
-                    unknown = false,
-                }
+    local current = plainNumber(rawValue)
+    local max = plainNumber(rawMax)
+    if type(current) ~= "number" and type(max) ~= "number" then
+        return nil
+    end
+
+    local chargeModRate = plainNumber(rawChargeModRate)
+    if not (chargeModRate and numberGT(chargeModRate, 0)) then
+        chargeModRate = 1
+    end
+
+    return {
+        current = current,
+        max = max,
+        rechargeStart = plainNumber(rawRechargeStart),
+        rechargeDuration = plainNumber(rawRechargeDuration),
+        chargeModRate = chargeModRate,
+        unknown = false,
+    }
+end
+
+local function getCooldownInfoBySpellID(spellID)
+    return getCachedSpellRuntimeValue(spellRuntimeCache.cooldown, spellID, function(normalizedSpellID)
+        if C_Spell and C_Spell.GetSpellCooldown then
+            local ok, cooldownInfo = pcall(C_Spell.GetSpellCooldown, normalizedSpellID)
+            if ok then
+                local normalized = normalizeCooldownInfo(cooldownInfo)
+                if normalized then
+                    return normalized
+                end
+            end
+        end
+
+        if GetSpellCooldown then
+            local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, normalizedSpellID)
+            if okLegacy then
+                return normalizeCooldownInfo(startTime, duration, enabled, modRate)
+            end
+        end
+
+        return nil
+    end)
+end
+
+local function getChargesInfoBySpellID(spellID)
+    return getCachedSpellRuntimeValue(spellRuntimeCache.charges, spellID, function(normalizedSpellID)
+        local rawCharges = nil
+        if C_Spell and C_Spell.GetSpellCharges then
+            local ok, chargesInfo = pcall(C_Spell.GetSpellCharges, normalizedSpellID)
+            if ok and type(chargesInfo) == "table" then
+                rawCharges = chargesInfo
+                local normalized = normalizeChargesInfo(chargesInfo)
+                if normalized then
+                    return normalized
+                end
+            end
+        end
+
+        if GetSpellCharges then
+            local okLegacy, current, max, rechargeStart, rechargeDuration, chargeModRate = pcall(GetSpellCharges, normalizedSpellID)
+            if okLegacy then
+                local normalizedLegacy = normalizeChargesInfo(current, max, rechargeStart, rechargeDuration, chargeModRate)
+                if normalizedLegacy then
+                    return normalizedLegacy
+                end
+            end
+        end
+
+        if rawCharges and (not isNilValue(rawCharges.currentCharges) or not isNilValue(rawCharges.maxCharges)) then
+            return {
+                unknown = true,
+            }
+        end
+
+        return nil
+    end)
+end
+
+local function getDurationObjectBySpellID(spellID, useChargeDuration)
+    local bucket = useChargeDuration and spellRuntimeCache.chargeDuration or spellRuntimeCache.cooldownDuration
+    return getCachedSpellRuntimeValue(bucket, spellID, function(normalizedSpellID)
+        local getter
+        if useChargeDuration then
+            getter = C_Spell and C_Spell.GetSpellChargeDuration
+        else
+            getter = C_Spell and C_Spell.GetSpellCooldownDuration
+        end
+        if type(getter) ~= "function" then
+            return nil
+        end
+        local ok, durationObject = pcall(getter, normalizedSpellID)
+        if ok and durationObject ~= nil then
+            return durationObject
+        end
+        return nil
+    end)
+end
+
+local function getCooldownInfoScore(info)
+    if type(info) ~= "table" then
+        return -1
+    end
+
+    local startTime = plainNumber(info.startTime) or 0
+    local duration = plainNumber(info.duration) or 0
+    if numberGT(startTime, 0) and numberGT(duration, REAL_COOLDOWN_MIN_SECONDS) then
+        return 4
+    end
+    if numberGT(duration, REAL_COOLDOWN_MIN_SECONDS) then
+        return 3
+    end
+    if numberGT(startTime, 0) and numberGT(duration, 0) then
+        return 2
+    end
+    if numberGT(duration, 0) then
+        return 1
+    end
+    return 0
+end
+
+local function getCooldownEndTime(info)
+    local startTime = plainNumber(info and info.startTime)
+    local duration = plainNumber(info and info.duration)
+    local modRate = plainNumber(info and info.modRate)
+    if not (modRate and numberGT(modRate, 0)) then
+        modRate = 1
+    end
+    if type(startTime) == "number" and type(duration) == "number" and numberGT(startTime, 0) and numberGT(duration, 0) then
+        return startTime + (duration / modRate)
+    end
+    return nil
+end
+
+local function getChargesInfoScore(info)
+    if type(info) ~= "table" then
+        return -1
+    end
+    if info.unknown then
+        return 0
+    end
+
+    local score = -1
+    local current = plainNumber(info.current)
+    local max = plainNumber(info.max)
+    if type(current) == "number" or type(max) == "number" then
+        score = 1
+    end
+    if type(max) == "number" and numberGT(max, 1) then
+        score = score + 4
+    elseif type(max) == "number" and numberGE(max, 1) then
+        score = score + 2
+    end
+    if type(info.rechargeDuration) == "number" and numberGT(info.rechargeDuration, 0) then
+        score = score + 1
+    end
+    return score
+end
+
+local function getOverrideAwareCooldownInfo(spellID)
+    local bestInfo
+    local bestSourceSpellID
+    local bestScore = -1
+    local bestEndTime = nil
+
+    for _, candidateSpellID in ipairs(getSpellCandidateIDs(spellID)) do
+        local cooldownInfo = getCooldownInfoBySpellID(candidateSpellID)
+        if cooldownInfo then
+            local score = getCooldownInfoScore(cooldownInfo)
+            local endTime = getCooldownEndTime(cooldownInfo)
+            local shouldTake = false
+            if score > bestScore then
+                shouldTake = true
+            elseif score == bestScore then
+                if type(endTime) == "number" and (type(bestEndTime) ~= "number" or endTime > bestEndTime) then
+                    shouldTake = true
+                elseif bestInfo == nil then
+                    shouldTake = true
+                end
+            end
+
+            if shouldTake then
+                bestInfo = cooldownInfo
+                bestSourceSpellID = candidateSpellID
+                bestScore = score
+                bestEndTime = endTime
             end
         end
     end
 
-    if not isNilValue(charges.currentCharges) or not isNilValue(charges.maxCharges) then
-        return {
-            unknown = true,
-        }
+    return bestInfo, bestSourceSpellID
+end
+
+local function getOverrideAwareChargesInfo(spellID)
+    local bestInfo
+    local bestSourceSpellID
+    local bestScore = -1
+
+    for _, candidateSpellID in ipairs(getSpellCandidateIDs(spellID)) do
+        local chargesInfo = getChargesInfoBySpellID(candidateSpellID)
+        if chargesInfo then
+            local score = getChargesInfoScore(chargesInfo)
+            if score > bestScore then
+                bestInfo = chargesInfo
+                bestSourceSpellID = candidateSpellID
+                bestScore = score
+            elseif score == bestScore and bestInfo == nil then
+                bestInfo = chargesInfo
+                bestSourceSpellID = candidateSpellID
+            end
+        end
+    end
+
+    return bestInfo, bestSourceSpellID
+end
+
+local function getOverrideAwareDurationObject(spellID, useChargeDuration)
+    for _, candidateSpellID in ipairs(getSpellCandidateIDs(spellID)) do
+        local durationObject = getDurationObjectBySpellID(candidateSpellID, useChargeDuration)
+        if durationObject then
+            return durationObject, candidateSpellID
+        end
+    end
+    return nil, nil
+end
+
+local function getActiveGCDInfo(spellID)
+    local candidateSpellIDs = getSpellCandidateIDs(spellID)
+    for _, candidateSpellID in ipairs(candidateSpellIDs) do
+        local cooldownInfo = getCooldownInfoBySpellID(candidateSpellID)
+        local duration = plainNumber(cooldownInfo and cooldownInfo.duration)
+        if cooldownInfo and isTrueFlag(cooldownInfo.isOnGCD, false) and duration and numberGT(duration, 0) and numberLE(duration, 2.0) then
+            return cooldownInfo, candidateSpellID
+        end
+    end
+
+    local gcdInfo = getCooldownInfoBySpellID(GCD_SPELL_ID)
+    local gcdDuration = plainNumber(gcdInfo and gcdInfo.duration)
+    if gcdInfo and gcdDuration and numberGT(gcdDuration, 0) and numberLE(gcdDuration, 2.0) then
+        return gcdInfo, GCD_SPELL_ID
+    end
+
+    return nil, nil
+end
+
+local function computeCooldownReadyFromInfo(info)
+    if type(info) ~= "table" then
+        return nil
+    end
+
+    if isFalseFlag(info.isEnabled, false) then
+        return nil
+    end
+
+    local duration = plainNumber(info.duration)
+    if duration and numberLE(duration, 0) then
+        return true
+    end
+    if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
+        return true
+    end
+
+    local cooldownEndTime = getCooldownEndTime(info)
+    if cooldownEndTime then
+        if numberLE(cooldownEndTime, getNowTime() + 0.05) then
+            return true
+        end
+        return false
+    end
+
+    if duration and numberGT(duration, 0) then
+        return false
     end
 
     return nil
+end
+
+local function getSpellRuntimeState(spellID)
+    return getCachedSpellRuntimeValue(spellRuntimeCache.state, spellID, function(normalizedSpellID)
+        local cooldownInfo, cooldownSourceSpellID = getOverrideAwareCooldownInfo(normalizedSpellID)
+        local chargesInfo, chargesSourceSpellID = getOverrideAwareChargesInfo(normalizedSpellID)
+        local cooldownDurationObject, cooldownDurationSourceSpellID = getOverrideAwareDurationObject(normalizedSpellID, false)
+        local chargeDurationObject, chargeDurationSourceSpellID = getOverrideAwareDurationObject(normalizedSpellID, true)
+        local gcdInfo, gcdSourceSpellID = getActiveGCDInfo(normalizedSpellID)
+        local cooldownReady = computeCooldownReadyFromInfo(cooldownInfo)
+        local cooldownEndTime = getCooldownEndTime(cooldownInfo)
+        local duration = plainNumber(cooldownInfo and cooldownInfo.duration)
+        local chargeMax = plainNumber(chargesInfo and chargesInfo.max)
+        local multiCharge = chargesInfo and not chargesInfo.unknown and chargeMax and numberGT(chargeMax, 1) or false
+
+        return {
+            spellID = normalizedSpellID,
+            candidateSpellIDs = getSpellCandidateIDs(normalizedSpellID),
+            cooldownInfo = cooldownInfo,
+            cooldownSourceSpellID = cooldownSourceSpellID,
+            chargesInfo = chargesInfo,
+            chargesSourceSpellID = chargesSourceSpellID,
+            cooldownDurationObject = cooldownDurationObject,
+            cooldownDurationSourceSpellID = cooldownDurationSourceSpellID,
+            chargeDurationObject = chargeDurationObject,
+            chargeDurationSourceSpellID = chargeDurationSourceSpellID,
+            gcdInfo = gcdInfo,
+            gcdSourceSpellID = gcdSourceSpellID,
+            cooldownEndTime = cooldownEndTime,
+            cooldownReady = cooldownReady,
+            hasRealCooldown = type(duration) == "number"
+                and numberGT(duration, REAL_COOLDOWN_MIN_SECONDS)
+                and not isTrueFlag(cooldownInfo and cooldownInfo.isOnGCD, false),
+            isMultiCharge = multiCharge and true or false,
+        }
+    end)
+end
+
+local function setCooldownFrameFromDurationObject(cooldownFrame, durationObject)
+    if type(cooldownFrame) ~= "table" or durationObject == nil or type(cooldownFrame.SetCooldownFromDurationObject) ~= "function" then
+        return false
+    end
+    local ok = pcall(cooldownFrame.SetCooldownFromDurationObject, cooldownFrame, durationObject)
+    return ok == true
+end
+
+getSafeCharges = function(spellID)
+    local state = getSpellRuntimeState(spellID)
+    return state and state.chargesInfo or nil
 end
 
 local function getDisplayChargeState(spellID)
@@ -665,6 +1141,10 @@ local function getDisplayChargeState(spellID)
 end
 
 local function shouldShowCooldownSwipe(spellID)
+    local state = getSpellRuntimeState(spellID)
+    if state and state.isMultiCharge then
+        return false
+    end
     local charges = getDisplayChargeState(spellID)
     local max = charges and charges.max
     if charges and not charges.unknown and max and numberGT(max, 1) then
@@ -1148,28 +1628,31 @@ local function shouldGlowEntry(entry)
 end
 
 isSpellKnownSafe = function(spellID)
-    if not spellID then
+    local candidates = getSpellCandidateIDs(spellID)
+    if #candidates == 0 then
         return false
     end
 
-    if IsSpellKnownOrOverridesKnown then
-        local ok, known = pcall(IsSpellKnownOrOverridesKnown, spellID)
-        if ok and known then
-            return true
+    for _, candidateSpellID in ipairs(candidates) do
+        if IsSpellKnownOrOverridesKnown then
+            local ok, known = pcall(IsSpellKnownOrOverridesKnown, candidateSpellID)
+            if ok and known then
+                return true
+            end
         end
-    end
 
-    if IsPlayerSpell then
-        local ok, known = pcall(IsPlayerSpell, spellID)
-        if ok and known then
-            return true
+        if IsPlayerSpell then
+            local ok, known = pcall(IsPlayerSpell, candidateSpellID)
+            if ok and known then
+                return true
+            end
         end
-    end
 
-    if IsSpellKnown then
-        local ok, known = pcall(IsSpellKnown, spellID)
-        if ok and known then
-            return true
+        if IsSpellKnown then
+            local ok, known = pcall(IsSpellKnown, candidateSpellID)
+            if ok and known then
+                return true
+            end
         end
     end
 
@@ -1180,12 +1663,21 @@ local function isSpellUsableSafe(spellID)
     if not IsUsableSpell then
         return false
     end
-    local ok, usable = pcall(function()
-        return IsUsableSpell(spellID)
-    end)
-    if ok then
-        return usable and true or false
+
+    local candidates = getSpellCandidateIDs(spellID)
+    if #candidates == 0 then
+        candidates = { spellID }
     end
+
+    for _, candidateSpellID in ipairs(candidates) do
+        local ok, usable = pcall(function()
+            return IsUsableSpell(candidateSpellID)
+        end)
+        if ok and usable then
+            return true
+        end
+    end
+
     return false
 end
 
@@ -1193,16 +1685,29 @@ local function isSpellResourceUsableSafe(spellID)
     if not IsUsableSpell then
         return true
     end
-    local ok, usable, noMana = pcall(IsUsableSpell, spellID)
-    if not ok then
-        return true
+
+    local candidates = getSpellCandidateIDs(spellID)
+    if #candidates == 0 then
+        candidates = { spellID }
     end
-    if usable then
-        return true
+
+    local sawNoMana = false
+    for _, candidateSpellID in ipairs(candidates) do
+        local ok, usable, noMana = pcall(IsUsableSpell, candidateSpellID)
+        if ok then
+            if usable then
+                return true
+            end
+            if noMana then
+                sawNoMana = true
+            end
+        end
     end
-    if noMana then
+
+    if sawNoMana then
         return false
     end
+
     return true
 end
 
@@ -1221,24 +1726,11 @@ local function getCooldownReady(spellID)
         return false
     end
 
-    if C_Spell and C_Spell.GetSpellCooldown then
-        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-        if not ok or not info then
-            return isSpellUsableSafe(spellID)
-        end
-        -- Midnight can return secret booleans; avoid direct truth tests on API fields.
-        if isFalseFlag(info.isEnabled, false) then
-            return isSpellUsableSafe(spellID)
-        end
-        local duration = plainNumber(info.duration)
-        if duration and numberLE(duration, 0) then
-            return true
-        end
-        if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
-            return true
-        end
-        return isSpellUsableSafe(spellID)
+    local state = getSpellRuntimeState(spellID)
+    if state and state.cooldownReady ~= nil then
+        return state.cooldownReady and true or false
     end
+
     return isSpellUsableSafe(spellID)
 end
 
@@ -1252,66 +1744,9 @@ local function getCooldownReadyByTimer(spellID, failOpen)
         allowFailOpen = false
     end
 
-    if C_Spell and C_Spell.GetSpellCooldown then
-        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-        if not ok or not info then
-            info = nil
-        end
-        if info then
-            if isFalseFlag(info.isEnabled, false) then
-                info = nil
-            else
-                local startTime = plainNumber(info.startTime)
-                local duration = plainNumber(info.duration)
-                local modRate = plainNumber(info.modRate)
-                if not (modRate and numberGT(modRate, 0)) then
-                    modRate = 1
-                end
-                if duration and numberLE(duration, 0) then
-                    return true
-                end
-                if isTrueFlag(info.isOnGCD, false) and duration and numberLE(duration, 1.7) then
-                    return true
-                end
-                if startTime and duration and numberGT(duration, 0) then
-                    local now = getNowTime()
-                    local effectiveDuration = duration / modRate
-                    if numberLE((startTime + effectiveDuration), now + 0.05) then
-                        return true
-                    end
-                    return false
-                end
-                if duration and numberGT(duration, 0) then
-                    return false
-                end
-            end
-        end
-    end
-
-    if GetSpellCooldown then
-        local okLegacy, startTime, duration, enabled, modRate = pcall(GetSpellCooldown, spellID)
-        if okLegacy then
-            local startN = plainNumber(startTime)
-            local durationN = plainNumber(duration)
-            local modRateN = plainNumber(modRate)
-            if not (modRateN and numberGT(modRateN, 0)) then
-                modRateN = 1
-            end
-            if enabled == 0 then
-                return allowFailOpen
-            end
-            if durationN and numberLE(durationN, 0) then
-                return true
-            end
-            if startN and durationN and numberGT(durationN, 0) then
-                local now = getNowTime()
-                local effectiveDuration = durationN / modRateN
-                if numberLE((startN + effectiveDuration), now + 0.05) then
-                    return true
-                end
-                return false
-            end
-        end
+    local state = getSpellRuntimeState(spellID)
+    if state and state.cooldownReady ~= nil then
+        return state.cooldownReady and true or false
     end
 
     return allowFailOpen
@@ -1613,42 +2048,12 @@ local function isLifeCocoonReady(spellID)
     end
 
     local determinedReady = nil
-
-    if C_Spell and C_Spell.GetSpellCooldown then
-        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
-        if ok and info then
-            local duration = plainNumber(info.duration)
-            if duration then
-                if numberLE(duration, 0) then
-                    determinedReady = true
-                elseif isTrueFlag(info.isOnGCD, false) and numberLE(duration, 1.7) then
-                    determinedReady = true
-                elseif numberGT(duration, 0) then
-                    determinedReady = false
-                end
-            end
-        end
+    local state = getSpellRuntimeState(spellID)
+    if state and state.cooldownReady ~= nil then
+        determinedReady = state.cooldownReady and true or false
     end
 
-    if determinedReady == nil and GetSpellCooldown then
-        local okLegacy, startTime, duration = pcall(GetSpellCooldown, spellID)
-        if okLegacy then
-            local startN = plainNumber(startTime)
-            local durationN = plainNumber(duration)
-            if durationN and numberLE(durationN, 0) then
-                determinedReady = true
-            elseif startN and durationN and numberGT(durationN, 0) then
-                local now = getNowTime()
-                if numberLE((startN + durationN), now + 0.05) then
-                    determinedReady = true
-                else
-                    determinedReady = false
-                end
-            end
-        end
-    end
-
-    local charges = getSafeCharges(spellID)
+    local charges = state and state.chargesInfo or getSafeCharges(spellID)
     if charges and not charges.unknown then
         local current = charges.current
         local max = charges.max
@@ -1828,6 +2233,8 @@ local function dumpSpellAPIDiagnostics(spellID)
         return false
     end
 
+    invalidateSpellRuntimeCache()
+
     local spellName = getSpellName(spellID)
     if not spellName or spellName == "" then
         spellName = "unknown"
@@ -1843,6 +2250,19 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(stateFields, "resourceUsable", isSpellResourceUsableSafe(spellID))
     appendDiagnosticField(stateFields, "inCombat", InCombatLockdown and InCombatLockdown() or false)
     emitDiagnosticLine("apidump state", stateFields)
+
+    local runtimeState = getSpellRuntimeState(spellID)
+    local runtimeFields = {}
+    appendDiagnosticField(runtimeFields, "candidates", runtimeState and table.concat(runtimeState.candidateSpellIDs or {}, ","))
+    appendDiagnosticField(runtimeFields, "cooldownSource", runtimeState and runtimeState.cooldownSourceSpellID)
+    appendDiagnosticField(runtimeFields, "chargesSource", runtimeState and runtimeState.chargesSourceSpellID)
+    appendDiagnosticField(runtimeFields, "cooldownDurationSource", runtimeState and runtimeState.cooldownDurationSourceSpellID)
+    appendDiagnosticField(runtimeFields, "chargeDurationSource", runtimeState and runtimeState.chargeDurationSourceSpellID)
+    appendDiagnosticField(runtimeFields, "cooldownEndTime", runtimeState and runtimeState.cooldownEndTime)
+    appendDiagnosticField(runtimeFields, "cooldownReady", runtimeState and runtimeState.cooldownReady)
+    appendDiagnosticField(runtimeFields, "hasRealCooldown", runtimeState and runtimeState.hasRealCooldown)
+    appendDiagnosticField(runtimeFields, "isMultiCharge", runtimeState and runtimeState.isMultiCharge)
+    emitDiagnosticLine("apidump runtime", runtimeFields)
 
     local cooldownInfo
     if C_Spell and C_Spell.GetSpellCooldown then
@@ -1931,6 +2351,14 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(durationFields, "remaining", getDurationObjectValue(durationObject, "GetRemainingDuration"))
     appendDiagnosticField(durationFields, "modRate", getDurationObjectValue(durationObject, "GetModRate"))
     emitDiagnosticLine("apidump durationObject", durationFields)
+
+    local chargeDurationObject = runtimeState and runtimeState.chargeDurationObject
+    local chargeDurationFields = {}
+    appendDiagnosticField(chargeDurationFields, "startTime", getDurationObjectValue(chargeDurationObject, "GetStartTime"))
+    appendDiagnosticField(chargeDurationFields, "duration", getDurationObjectValue(chargeDurationObject, "GetDuration"))
+    appendDiagnosticField(chargeDurationFields, "remaining", getDurationObjectValue(chargeDurationObject, "GetRemainingDuration"))
+    appendDiagnosticField(chargeDurationFields, "modRate", getDurationObjectValue(chargeDurationObject, "GetModRate"))
+    emitDiagnosticLine("apidump chargeDurationObject", chargeDurationFields)
 
     local readyFields = {}
     appendDiagnosticField(readyFields, "readyShared", getCooldownReady(spellID))
@@ -2401,18 +2829,18 @@ local function layoutEntries(entries)
             f.label:Hide()
         end
 
-        if C_Spell and C_Spell.GetSpellCooldown then
-            local ok, info = pcall(C_Spell.GetSpellCooldown, entries[i].spellID)
-            if not ok then
-                info = nil
+        local runtimeState = getSpellRuntimeState(entries[i].spellID)
+        local cooldownInfo = runtimeState and runtimeState.cooldownInfo
+        local startTime = cooldownInfo and plainNumber(cooldownInfo.startTime)
+        local duration = cooldownInfo and plainNumber(cooldownInfo.duration)
+        local isOnGCD = cooldownInfo and isTrueFlag(cooldownInfo.isOnGCD, false)
+        if cooldownInfo and startTime and duration and numberGT(duration, 1.5) and not isOnGCD and shouldShowCooldownSwipe(entries[i].spellID) then
+            local appliedDurationObject = false
+            if runtimeState and runtimeState.cooldownDurationObject then
+                appliedDurationObject = setCooldownFrameFromDurationObject(f.cooldown, runtimeState.cooldownDurationObject)
             end
-            local startTime = info and plainNumber(info.startTime)
-            local duration = info and plainNumber(info.duration)
-            local isOnGCD = info and isTrueFlag(info.isOnGCD, false)
-            if info and startTime and duration and numberGT(duration, 1.5) and not isOnGCD and shouldShowCooldownSwipe(entries[i].spellID) then
+            if not appliedDurationObject then
                 f.cooldown:SetCooldown(startTime, duration)
-            else
-                f.cooldown:Clear()
             end
         else
             f.cooldown:Clear()
@@ -3373,6 +3801,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             return
         end
         copyDefaults(HealingPriorityMouseDB, defaults)
+        invalidateSpellRuntimeCache()
         sanitizeCustomTrackedSpellsInDB()
         ensureDefaultTrackedSpellsForActiveSpec()
         createMinimapButton()
@@ -3397,10 +3826,13 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         return
     end
 
+    invalidateSpellRuntimeCache()
+
     if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
         local castSpellID = plainNumber(arg3)
         if castSpellID then
-            local liveCharges = getSafeCharges(castSpellID)
+            local castState = getSpellRuntimeState(castSpellID)
+            local liveCharges = castState and castState.chargesInfo or getSafeCharges(castSpellID)
             local hasLiveChargeState = liveCharges and not liveCharges.unknown and liveCharges.current and liveCharges.max
             if hasLiveChargeState and liveCharges.max and numberGT(liveCharges.max, 1) then
                 applyChargeSpendToCache(castSpellID, liveCharges)
@@ -3420,13 +3852,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                 local cooldownStart
                 local cooldownDuration
                 local cooldownModRate
-                if C_Spell and C_Spell.GetSpellCooldown then
-                    local okCooldown, cooldownInfo = pcall(C_Spell.GetSpellCooldown, castSpellID)
-                    if okCooldown and type(cooldownInfo) == "table" then
-                        cooldownStart = plainNumber(cooldownInfo.startTime)
-                        cooldownDuration = plainNumber(cooldownInfo.duration)
-                        cooldownModRate = plainNumber(cooldownInfo.modRate)
-                    end
+                local cooldownInfo = castState and castState.cooldownInfo
+                if type(cooldownInfo) == "table" then
+                    cooldownStart = plainNumber(cooldownInfo.startTime)
+                    cooldownDuration = plainNumber(cooldownInfo.duration)
+                    cooldownModRate = plainNumber(cooldownInfo.modRate)
                 end
                 local cocoonState = {
                     current = 0,

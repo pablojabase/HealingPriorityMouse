@@ -4,11 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0-beta.1] - 2026-04-03
+
 ### Added
-- Added a minimap button that opens the in-game options window on left click, can be right-dragged around the minimap edge, and supports a custom texture file fallback.
+- Added a movable minimap button with custom texture fallback support for quick access to the in-game options window.
 
 ### Changed
-- Swapped minimap button interactions so left-drag moves the button and right-click opens the options window.
+- Rebuilt the internal spell cooldown runtime around normalized cooldown/charge reads, override-aware spell ID resolution, cached per-spell runtime state, and duration-object support while keeping the addon's recommendation capabilities the same.
+- Routed shared readiness checks, charge display decisions, combat cache handling, and icon cooldown swipe rendering through the new canonical spell runtime instead of ad hoc direct API reads.
+- Updated the minimap button interaction model so left-drag moves the icon and right-click opens options.
+
+### Fixed
+- Reduced the risk of spell display regressions caused by override spell IDs, GCD contamination, mismatched cooldown sources, and desynced cooldown-vs-charge reads.
+- Improved cooldown swipe fidelity by preferring Blizzard duration objects for real cooldowns when available instead of relying only on raw start/duration pairs.
 
 ## [1.0.15-beta.2] - 2026-03-22
 

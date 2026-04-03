@@ -144,6 +144,7 @@ When making a release-ready change:
 
 - First read: `AI_AGENT_PLAYBOOK.md`, then `HealingPriorityMouse.lua` around readiness helpers and custom spell loop.
 - Core recommendation assembly now routes through `SPELL_POLICIES`; prefer adjusting a spell policy or adding a narrow override before broad shared-helper changes.
+- Cooldown/charge truth now flows through a normalized runtime layer with override-aware spell ID resolution and duration-object support; prefer reusing that runtime state instead of adding new direct `C_Spell` reads in scattered call sites.
 - Respect user preference to push quickly with **no tags** when requested.
 - If a fix touches readiness helpers, explicitly state blast radius (shared vs spell-specific).
 - For combat regressions, validate in this order:
