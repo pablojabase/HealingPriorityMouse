@@ -1200,8 +1200,7 @@ local function sanitizeCustomTrackedSpellsInDB()
         local spellID = plainNumber(value)
         if spellID
             and numberGT(spellID, 0)
-            and not seen[spellID]
-            and not (isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(spellID)) then
+            and not seen[spellID] then
             seen[spellID] = true
             normalized[#normalized + 1] = spellID
         end
@@ -1257,9 +1256,6 @@ local function addSpellOption(options, seen, spellID)
     if not id or not numberGT(id, 0) or seen[id] then
         return
     end
-    if isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(id) then
-        return
-    end
     if isSpellInTrackedList(id) then
         return
     end
@@ -1294,7 +1290,6 @@ local CLASS_SPELL_KEYS = {
 }
 
 local getSpecID
-local isReservedCoreTrackedSpellID
 
 local SPEC_CUSTOM_SPELL_IDS = {
     [105] = { -- Restoration Druid
@@ -1380,22 +1375,18 @@ local CORE_SPELL_KEYS_BY_SPEC = {
     [257] = { "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
 }
 
-isReservedCoreTrackedSpellID = function(spellID)
-    local id = plainNumber(spellID)
-    if not id or not numberGT(id, 0) then
-        return false
-    end
-
-    for _, keys in pairs(CORE_SPELL_KEYS_BY_SPEC) do
-        for _, key in ipairs(keys) do
-            local resolvedID = resolveSpellID(key)
-            if resolvedID and resolvedID == id then
-                return true
-            end
+local function getDefaultTrackedSpellIDsForSpec(specID)
+    local defaultsForSpec = {}
+    local seen = {}
+    local keys = CORE_SPELL_KEYS_BY_SPEC[specID] or {}
+    for _, key in ipairs(keys) do
+        local spellID = resolveSpellID(key)
+        if spellID and not seen[spellID] then
+            seen[spellID] = true
+            defaultsForSpec[#defaultsForSpec + 1] = spellID
         end
     end
-
-    return false
+    return defaultsForSpec
 end
 
 local function collectKnownClassSpellOptions()
@@ -1428,9 +1419,6 @@ local function addCustomTrackedSpell(spellID)
     if not id or not numberGT(id, 0) then
         return false, "invalid"
     end
-    if isReservedCoreTrackedSpellID and isReservedCoreTrackedSpellID(id) then
-        return false, "core-managed"
-    end
     if not isValidSpellID(id) then
         return false, "not-found"
     end
@@ -1447,7 +1435,52 @@ local function addCustomTrackedSpell(spellID)
 end
 
 local function ensureDefaultTrackedSpellsForActiveSpec()
-    sanitizeCustomTrackedSpellsInDB()
+    local activeSpells = sanitizeCustomTrackedSpellsInDB()
+    local db = HealingPriorityMouseDB
+    if not db then
+        return
+    end
+
+    local specID = getSpecID and getSpecID() or nil
+    if not specID then
+        return
+    end
+
+    local playerName, realmName = UnitFullName("player")
+    playerName = playerName or UnitName("player") or "Unknown"
+    realmName = realmName or GetRealmName() or "Unknown"
+    local characterKey = tostring(playerName) .. "-" .. tostring(realmName)
+
+    if type(db.customTrackedSpecsInitializedByCharacter) ~= "table" then
+        db.customTrackedSpecsInitializedByCharacter = {}
+    end
+    if type(db.customTrackedSpecsInitializedByCharacter[characterKey]) ~= "table" then
+        db.customTrackedSpecsInitializedByCharacter[characterKey] = {}
+    end
+
+    if db.customTrackedSpecsInitializedByCharacter[characterKey][specID] then
+        return
+    end
+
+    local seen = {}
+    for _, spellID in ipairs(activeSpells) do
+        seen[spellID] = true
+    end
+
+    local addedAny = false
+    for _, spellID in ipairs(getDefaultTrackedSpellIDsForSpec(specID)) do
+        if not seen[spellID] then
+            activeSpells[#activeSpells + 1] = spellID
+            seen[spellID] = true
+            addedAny = true
+        end
+    end
+
+    db.customTrackedSpecsInitializedByCharacter[characterKey][specID] = true
+
+    if addedAny then
+        sanitizeCustomTrackedSpellsInDB()
+    end
 end
 
 local function removeCustomTrackedSpell(spellID)
@@ -2754,7 +2787,7 @@ local function buildEntries()
         if not spellID then
             return false
         end
-        if (not isHandledByCoreSpecLogic(spellID)) and (not isSpellInTrackedList(spellID)) then
+        if not isSpellInTrackedList(spellID) then
             return false
         end
         if addedSpellIDs[spellID] then
@@ -3397,7 +3430,7 @@ local function createOptionsFrame()
     end)
 
     local customSpellsLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    customSpellsLabel:SetText("Custom tracked spells")
+    customSpellsLabel:SetText("Tracked spells")
 
     local customSpellDropdown = CreateFrame("Frame", "HealingPriorityMouseCustomSpellDropdown", frame, "UIDropDownMenuTemplate")
     UIDropDownMenu_SetWidth(customSpellDropdown, 220)
@@ -3431,7 +3464,7 @@ local function createOptionsFrame()
     addSpellButton:SetText("Add")
 
     local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    customSpellHint:SetText("Dropdown shows additional known spells you can track for this character.")
+    customSpellHint:SetText("Defaults are pre-populated per healer spec, but any tracked spell can be removed and class spells can be added for this character.")
 
     local customSpellListScroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     local customSpellListContent = CreateFrame("Frame", nil, customSpellListScroll)
@@ -3440,7 +3473,7 @@ local function createOptionsFrame()
 
     local customSpellEmpty = customSpellListContent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     customSpellEmpty:SetPoint("TOPLEFT", customSpellListContent, "TOPLEFT", 2, -6)
-    customSpellEmpty:SetText("No additional tracked spells added.")
+    customSpellEmpty:SetText("No tracked spells selected.")
 
     local customSpellRows = {}
 
@@ -3541,9 +3574,7 @@ local function createOptionsFrame()
             return
         end
         if reason == "duplicate" then
-            msg("custom spell already tracked")
-        elseif reason == "core-managed" then
-            msg("that spell is already handled by the built-in core logic")
+            msg("that spell is already tracked")
         elseif reason == "not-found" then
             msg("selected spell is not available on this client")
         else

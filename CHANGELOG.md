@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file.
 - Expanded the addable tracked-spell pool for Restoration Druids with `Nature's Cure`, `Nature's Swiftness`, `Convoke the Spirits`, `Incarnation: Tree of Life`, and `Innervate`.
 - Expanded the addable tracked-spell pool for Mistweaver Monks with `Rushing Wind Kick` and `Rising Sun Kick`.
 
+### Changed
+- Converted built-in healer defaults into pre-populated tracked spells that can be removed by the user, instead of treating them as untouchable core-managed entries.
+- Allowed tracked class spells such as `Innervate` to be added and shown from non-healer specs as long as the character knows the spell.
+
 ## [2.0.0-beta.1] - 2026-04-03
 
 ### Added
