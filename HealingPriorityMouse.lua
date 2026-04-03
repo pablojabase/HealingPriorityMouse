@@ -197,6 +197,26 @@ local function getNowTime()
     return 0
 end
 
+local function isUsableString(value)
+    if type(value) ~= "string" then
+        return false
+    end
+    local ok, isEmpty = pcall(function()
+        return value == ""
+    end)
+    return ok and (not isEmpty) or false
+end
+
+local function safeStringEquals(left, right)
+    if type(left) ~= "string" or type(right) ~= "string" then
+        return false
+    end
+    local ok, matches = pcall(function()
+        return left == right
+    end)
+    return ok and matches or false
+end
+
 local function getCachedGlowState(spellID)
     local state = glowStateCache[spellID]
     if not state then
@@ -416,8 +436,8 @@ local function getResolvedSpellLookup(key)
         lookup.hasEntries = true
 
         local spellName = getSpellName(spellID)
-        if spellName and spellName ~= "" then
-            lookup.names[spellName] = true
+        if isUsableString(spellName) then
+            lookup.names[#lookup.names + 1] = spellName
         end
     end
 
@@ -514,14 +534,9 @@ local function isAuraConceptActive(unit, spellKey, helpful, fromPlayer)
         return false
     end
 
-    local seenNames = {}
     for _, spellID in ipairs(spellIDs) do
-        local spellName = getSpellName(spellID)
-        if spellName and spellName ~= "" and not seenNames[spellName] then
-            seenNames[spellName] = true
-            if isAuraActive(unit, spellID, helpful, fromPlayer) then
-                return true
-            end
+        if isAuraActive(unit, spellID, helpful, fromPlayer) then
+            return true
         end
     end
 
@@ -617,8 +632,12 @@ local function auraMatchesSpellLookup(auraData, lookup)
     end
 
     local auraName = auraData.name
-    if type(auraName) == "string" and auraName ~= "" and lookup.names[auraName] then
-        return true
+    if type(auraName) == "string" and type(lookup.names) == "table" then
+        for _, candidateName in ipairs(lookup.names) do
+            if safeStringEquals(auraName, candidateName) then
+                return true
+            end
+        end
     end
 
     return false
@@ -3546,7 +3565,7 @@ refreshOptionsControls = function()
                 row.icon:SetTexture(getSpellTexture(spellID) or 136243)
 
                 local spellName = getSpellName(spellID)
-                if spellName and spellName ~= "" then
+                if isUsableString(spellName) then
                     row.label:SetText(spellName)
                 else
                     row.label:SetText("Spell")

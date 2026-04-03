@@ -18,6 +18,7 @@ All notable changes to this project are documented in this file.
 - Hardened Disc `Atonement` counting by matching player-owned aura variants more reliably instead of assuming a single aura identity and a single player unit token.
 - Added a Disc-specific Atonement combat fallback that uses raid-combat-aware aura scans and event-driven cache updates so the in-icon count does not stick at `0` during combat.
 - Reworked the Atonement combat fallback to use `UNIT_AURA` update info instead of direct combat-log event registration, avoiding reload-time protected-call failures on current clients.
+- Removed direct secret-string comparisons from the Atonement aura-matching path so contingent aura scans fail closed instead of throwing Midnight taint errors.
 
 ## [2.0.0-beta.1] - 2026-04-03
 
