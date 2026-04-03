@@ -7,10 +7,12 @@ All notable changes to this project are documented in this file.
 ### Added
 - Expanded the addable tracked-spell pool for Restoration Druids with `Nature's Cure`, `Nature's Swiftness`, `Convoke the Spirits`, `Incarnation: Tree of Life`, and `Innervate`.
 - Expanded the addable tracked-spell pool for Mistweaver Monks with `Rushing Wind Kick` and `Rising Sun Kick`.
+- Added a `Remove All` tracked-spells button in the options panel to clear the current character's tracked list in one action.
 
 ### Changed
 - Converted built-in healer defaults into pre-populated tracked spells that can be removed by the user, instead of treating them as untouchable core-managed entries.
 - Allowed tracked class spells such as `Innervate` to be added and shown from non-healer specs as long as the character knows the spell.
+- Made policy-driven counter entries such as `Atonement` addable through the tracked-spell picker even when they are not treated as normal known castable spells.
 
 ## [2.0.0-beta.1] - 2026-04-03
 

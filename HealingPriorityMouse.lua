@@ -1160,13 +1160,16 @@ local function shouldShowCooldownSwipe(spellID)
     return true
 end
 
-local function sanitizeCustomTrackedSpellsInDB()
-    local db = HealingPriorityMouseDB
-
+local function getTrackedCharacterKey()
     local playerName, realmName = UnitFullName("player")
     playerName = playerName or UnitName("player") or "Unknown"
     realmName = realmName or GetRealmName() or "Unknown"
-    local characterKey = tostring(playerName) .. "-" .. tostring(realmName)
+    return tostring(playerName) .. "-" .. tostring(realmName)
+end
+
+local function sanitizeCustomTrackedSpellsInDB()
+    local db = HealingPriorityMouseDB
+    local characterKey = getTrackedCharacterKey()
 
     if type(db.customTrackedSpellsByCharacter) ~= "table" then
         db.customTrackedSpellsByCharacter = {}
@@ -1241,15 +1244,33 @@ local function isValidSpellID(spellID)
     return false
 end
 
+local getSpellPolicyBySpellID
 local function getSpellLabel(spellID)
     local name = getSpellName(spellID)
     if name and name ~= "" then
         return name .. " (" .. tostring(spellID) .. ")"
     end
+    if getSpellPolicyBySpellID then
+        local _, policy = getSpellPolicyBySpellID(spellID)
+        if policy and type(policy.label) == "string" and policy.label ~= "" then
+            return policy.label .. " (" .. tostring(spellID) .. ")"
+        end
+    end
     return "Unknown spell (" .. tostring(spellID) .. ")"
 end
 
 local isSpellKnownSafe
+
+local function isPolicyTrackableWithoutKnownSpell(spellID)
+    if not getSpellPolicyBySpellID then
+        return false
+    end
+    local _, policy = getSpellPolicyBySpellID(spellID)
+    if not policy then
+        return false
+    end
+    return policy.condition == "counterAlways"
+end
 
 local function addSpellOption(options, seen, spellID)
     local id = plainNumber(spellID)
@@ -1259,7 +1280,8 @@ local function addSpellOption(options, seen, spellID)
     if isSpellInTrackedList(id) then
         return
     end
-    if not isSpellKnownSafe(id) then
+    local allowPolicyOnly = isPolicyTrackableWithoutKnownSpell(id)
+    if not allowPolicyOnly and not isSpellKnownSafe(id) then
         return
     end
     local isPassive = false
@@ -1269,7 +1291,7 @@ local function addSpellOption(options, seen, spellID)
             isPassive = true
         end
     end
-    if isPassive then
+    if isPassive and not allowPolicyOnly then
         return
     end
 
@@ -1419,7 +1441,7 @@ local function addCustomTrackedSpell(spellID)
     if not id or not numberGT(id, 0) then
         return false, "invalid"
     end
-    if not isValidSpellID(id) then
+    if not isValidSpellID(id) and not isPolicyTrackableWithoutKnownSpell(id) then
         return false, "not-found"
     end
 
@@ -1446,10 +1468,7 @@ local function ensureDefaultTrackedSpellsForActiveSpec()
         return
     end
 
-    local playerName, realmName = UnitFullName("player")
-    playerName = playerName or UnitName("player") or "Unknown"
-    realmName = realmName or GetRealmName() or "Unknown"
-    local characterKey = tostring(playerName) .. "-" .. tostring(realmName)
+    local characterKey = getTrackedCharacterKey()
 
     if type(db.customTrackedSpecsInitializedByCharacter) ~= "table" then
         db.customTrackedSpecsInitializedByCharacter = {}
@@ -1481,6 +1500,32 @@ local function ensureDefaultTrackedSpellsForActiveSpec()
     if addedAny then
         sanitizeCustomTrackedSpellsInDB()
     end
+end
+
+local function clearAllTrackedSpells()
+    if not HealingPriorityMouseDB then
+        return false
+    end
+
+    local activeSpells = getCustomTrackedSpells()
+    local hadSpells = (#activeSpells > 0)
+    for index = #activeSpells, 1, -1 do
+        activeSpells[index] = nil
+    end
+
+    local db = HealingPriorityMouseDB
+    local characterKey = getTrackedCharacterKey()
+    if type(db.customTrackedSpecsInitializedByCharacter) ~= "table" then
+        db.customTrackedSpecsInitializedByCharacter = {}
+    end
+    if type(db.customTrackedSpecsInitializedByCharacter[characterKey]) ~= "table" then
+        db.customTrackedSpecsInitializedByCharacter[characterKey] = {}
+    end
+    for specID in pairs(CORE_SPELL_KEYS_BY_SPEC) do
+        db.customTrackedSpecsInitializedByCharacter[characterKey][specID] = true
+    end
+
+    return hadSpells
 end
 
 local function removeCustomTrackedSpell(spellID)
@@ -2636,7 +2681,7 @@ local function isSpellReadyForPolicy(policyKey, policy, spellID)
     return getCooldownReadyByTimer(spellID, true)
 end
 
-local function getSpellPolicyBySpellID(spellID)
+getSpellPolicyBySpellID = function(spellID)
     if not spellID then
         return nil, nil
     end
@@ -3078,6 +3123,13 @@ refreshOptionsControls = function()
 
     if optionsControls.customSpellRows then
         local spells = getCustomTrackedSpells()
+        if optionsControls.removeAllSpellsButton then
+            if #spells > 0 then
+                optionsControls.removeAllSpellsButton:Enable()
+            else
+                optionsControls.removeAllSpellsButton:Disable()
+            end
+        end
         local rows = optionsControls.customSpellRows
         local rowWidth = math.max(220, (optionsControls.customSpellListScroll:GetWidth() or 260) - 24)
 
@@ -3463,6 +3515,10 @@ local function createOptionsFrame()
     addSpellButton:SetSize(64, 24)
     addSpellButton:SetText("Add")
 
+    local removeAllSpellsButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    removeAllSpellsButton:SetSize(100, 24)
+    removeAllSpellsButton:SetText("Remove All")
+
     local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     customSpellHint:SetText("Defaults are pre-populated per healer spec, but any tracked spell can be removed and class spells can be added for this character.")
 
@@ -3521,8 +3577,11 @@ local function createOptionsFrame()
         addSpellButton:ClearAllPoints()
         addSpellButton:SetPoint("LEFT", customSpellDropdown, "RIGHT", -4, 2)
 
+        removeAllSpellsButton:ClearAllPoints()
+        removeAllSpellsButton:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -6)
+
         customSpellHint:ClearAllPoints()
-        customSpellHint:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -6)
+        customSpellHint:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 0, -8)
 
         customSpellListScroll:ClearAllPoints()
         customSpellListScroll:SetPoint("TOPLEFT", customSpellHint, "BOTTOMLEFT", 0, -8)
@@ -3586,6 +3645,17 @@ local function createOptionsFrame()
         handleAddCustomSpell()
     end)
 
+    removeAllSpellsButton:SetScript("OnClick", function()
+        local removed = clearAllTrackedSpells()
+        if removed then
+            refresh()
+            refreshOptionsControls()
+            msg("cleared all tracked spells for this character")
+        else
+            msg("no tracked spells to clear")
+        end
+    end)
+
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     closeBtn:SetSize(90, 24)
     closeBtn:SetPoint("BOTTOMRIGHT", -14, 12)
@@ -3624,6 +3694,7 @@ local function createOptionsFrame()
         customSpellOptions = {},
         selectedCustomSpellID = nil,
         addSpellButton = addSpellButton,
+        removeAllSpellsButton = removeAllSpellsButton,
         customSpellListScroll = customSpellListScroll,
         customSpellListContent = customSpellListContent,
         customSpellRows = customSpellRows,
@@ -3634,7 +3705,7 @@ local function createOptionsFrame()
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
-            customSpellsLabel, customSpellDropdown, addSpellButton,
+            customSpellsLabel, customSpellDropdown, addSpellButton, removeAllSpellsButton,
             customSpellHint, customSpellListScroll,
         },
         devWidgets = {
