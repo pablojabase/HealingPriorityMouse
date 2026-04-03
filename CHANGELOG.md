@@ -16,6 +16,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 - Hardened Disc `Atonement` counting by matching player-owned aura variants more reliably instead of assuming a single aura identity and a single player unit token.
+- Added a Disc-specific Atonement combat fallback that uses raid-combat-aware aura scans and combat-log cache updates so the in-icon count does not stick at `0` during combat.
 
 ## [2.0.0-beta.1] - 2026-04-03
 

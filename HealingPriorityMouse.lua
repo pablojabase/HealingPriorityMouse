@@ -155,6 +155,8 @@ local SPELLS = {
 
 local resolvedSpells = {}
 local resolvedSpellLists = {}
+local resolvedSpellLookups = {}
+local atonementCombatCache = {}
 
 local GLOW_RULES = {
     RenewingMist = {
@@ -395,6 +397,32 @@ local function resolveSpellIDs(key)
     return resolved
 end
 
+local function getResolvedSpellLookup(key)
+    if resolvedSpellLookups[key] ~= nil then
+        return resolvedSpellLookups[key]
+    end
+
+    local spellIDs = resolveSpellIDs(key)
+    local lookup = {
+        ids = {},
+        names = {},
+        hasEntries = false,
+    }
+
+    for _, spellID in ipairs(spellIDs) do
+        lookup.ids[spellID] = true
+        lookup.hasEntries = true
+
+        local spellName = getSpellName(spellID)
+        if spellName and spellName ~= "" then
+            lookup.names[spellName] = true
+        end
+    end
+
+    resolvedSpellLookups[key] = lookup
+    return lookup
+end
+
 local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if not unit or not UnitExists(unit) then
         return false
@@ -496,6 +524,120 @@ local function isAuraConceptActive(unit, spellKey, helpful, fromPlayer)
     end
 
     return false
+end
+
+local function enumerateUnitAuras(unit, filter, callback)
+    if not unit or not UnitExists(unit) or type(callback) ~= "function" then
+        return false
+    end
+
+    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+        local ok, auraList = pcall(C_UnitAuras.GetUnitAuras, unit, filter)
+        if ok and type(auraList) == "table" then
+            for auraIndex = 1, #auraList do
+                if callback(auraList[auraIndex]) then
+                    return true
+                end
+            end
+        end
+    end
+
+    if AuraUtil and AuraUtil.ForEachAura then
+        local matched = false
+        AuraUtil.ForEachAura(unit, filter, nil, function(auraData)
+            if callback(auraData) then
+                matched = true
+                return true
+            end
+            return false
+        end, true)
+        if matched then
+            return true
+        end
+    end
+
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        for auraIndex = 1, 80 do
+            local ok, auraData = pcall(C_UnitAuras.GetAuraDataByIndex, unit, auraIndex, filter)
+            if not ok or not auraData then
+                break
+            end
+            if callback(auraData) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function isPlayerOwnedAuraData(auraData)
+    if type(auraData) ~= "table" then
+        return false
+    end
+
+    if auraData.isFromPlayerOrPlayerPet == true then
+        return true
+    end
+
+    local sourceUnit = auraData.sourceUnit
+    if type(sourceUnit) == "string" and sourceUnit ~= "" then
+        if UnitIsUnit and UnitIsUnit(sourceUnit, "player") then
+            return true
+        end
+        if UnitIsOwnerOrControllerOfUnit and UnitIsOwnerOrControllerOfUnit("player", sourceUnit) then
+            return true
+        end
+    end
+
+    local playerGUID = UnitGUID("player")
+    local sourceGUID = auraData.sourceGUID
+    return playerGUID and sourceGUID and sourceGUID == playerGUID or false
+end
+
+local function getAtonementAuraFilter(unit)
+    local filter = "PLAYER|HELPFUL"
+    local inCombat = InCombatLockdown and InCombatLockdown()
+    if inCombat and unit and unit ~= "player" and (unit:match("^party") or unit:match("^raid")) then
+        filter = filter .. "|RAID_IN_COMBAT"
+    end
+    return filter
+end
+
+local function auraMatchesSpellLookup(auraData, lookup)
+    if type(auraData) ~= "table" or type(lookup) ~= "table" then
+        return false
+    end
+
+    local auraSpellID = plainNumber(auraData.spellId)
+    if auraSpellID and lookup.ids[auraSpellID] then
+        return true
+    end
+
+    local auraName = auraData.name
+    if type(auraName) == "string" and auraName ~= "" and lookup.names[auraName] then
+        return true
+    end
+
+    return false
+end
+
+local function findAuraConceptOnUnit(unit, spellKey, filter, requirePlayerOwned)
+    local lookup = getResolvedSpellLookup(spellKey)
+    if not lookup.hasEntries then
+        return nil
+    end
+
+    local matchedAura = nil
+    enumerateUnitAuras(unit, filter, function(auraData)
+        if auraMatchesSpellLookup(auraData, lookup) and ((not requirePlayerOwned) or isPlayerOwnedAuraData(auraData)) then
+            matchedAura = auraData
+            return true
+        end
+        return false
+    end)
+
+    return matchedAura
 end
 
 local function isPlayerTotemActive(spellID)
@@ -1958,6 +2100,96 @@ local function countAuraConceptInGroup(spellKey, fromPlayerOnly)
     return n
 end
 
+local function getGroupUnitByGUID(guid)
+    if not guid then
+        return nil
+    end
+
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and UnitGUID(unit) == guid then
+            return unit
+        end
+    end
+
+    return nil
+end
+
+local function cacheAtonementUnitState(unit, expirationTime)
+    local unitGUID = unit and UnitGUID(unit)
+    if not unitGUID then
+        return
+    end
+
+    if expirationTime and numberGT(expirationTime, getNowTime()) then
+        atonementCombatCache[unitGUID] = expirationTime
+        return
+    end
+
+    atonementCombatCache[unitGUID] = getNowTime() + 15
+end
+
+local function clearAtonementUnitStateByGUID(unitGUID)
+    if unitGUID then
+        atonementCombatCache[unitGUID] = nil
+    end
+end
+
+local function pruneExpiredAtonementCombatCache()
+    local now = getNowTime()
+    for unitGUID, expirationTime in pairs(atonementCombatCache) do
+        if not expirationTime or expirationTime <= now then
+            atonementCombatCache[unitGUID] = nil
+        end
+    end
+end
+
+local function findAtonementAuraOnUnit(unit)
+    local aura = findAuraConceptOnUnit(unit, "AtonementAura", getAtonementAuraFilter(unit), true)
+    if aura then
+        return aura
+    end
+
+    local canonicalAura = findAuraConceptOnUnit(unit, "AtonementAura", "HELPFUL", true)
+    if canonicalAura then
+        return canonicalAura
+    end
+
+    return nil
+end
+
+local function countAtonementInGroup()
+    pruneExpiredAtonementCombatCache()
+
+    local now = getNowTime()
+    local n = 0
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            local aura = findAtonementAuraOnUnit(unit)
+            if aura then
+                local expirationTime = plainNumber(aura.expirationTime)
+                cacheAtonementUnitState(unit, expirationTime)
+                n = n + 1
+            else
+                local unitGUID = UnitGUID(unit)
+                local cachedExpiration = unitGUID and atonementCombatCache[unitGUID]
+                if cachedExpiration and cachedExpiration > now then
+                    n = n + 1
+                end
+            end
+        end
+    end
+
+    return n
+end
+
+local function isAtonementAuraSpellID(spellID)
+    local id = plainNumber(spellID)
+    if not id then
+        return false
+    end
+    return getResolvedSpellLookup("AtonementAura").ids[id] == true
+end
+
 local function countAliveGroupUnits()
     local n = 0
     for _, unit in ipairs(getGroupUnits()) do
@@ -2668,7 +2900,9 @@ local SPELL_POLICIES = {
         auraCountKey = "AtonementAura",
         iconCount = function(_, spellID, policy)
             local count
-            if policy.auraCountKey then
+            if policy.auraCountKey == "AtonementAura" then
+                count = countAtonementInGroup()
+            elseif policy.auraCountKey then
                 count = countAuraConceptInGroup(policy.auraCountKey, policy.fromPlayerOnly)
             else
                 count = countAuraInGroup(spellID, policy.fromPlayerOnly)
@@ -4016,6 +4250,7 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -4045,6 +4280,27 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     end
 
     if event == "UNIT_POWER_UPDATE" and arg1 ~= "player" then
+        return
+    end
+
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID = CombatLogGetCurrentEventInfo()
+        local playerGUID = UnitGUID("player")
+        if playerGUID and sourceGUID == playerGUID and isAtonementAuraSpellID(spellID) then
+            if subEvent == "SPELL_AURA_REMOVED" then
+                clearAtonementUnitStateByGUID(destGUID)
+            elseif subEvent == "SPELL_AURA_APPLIED" or subEvent == "SPELL_AURA_REFRESH" then
+                local destUnit = getGroupUnitByGUID(destGUID)
+                if destUnit then
+                    local aura = findAtonementAuraOnUnit(destUnit)
+                    cacheAtonementUnitState(destUnit, aura and plainNumber(aura.expirationTime) or nil)
+                elseif destGUID then
+                    atonementCombatCache[destGUID] = getNowTime() + 15
+                end
+            end
+            invalidateSpellRuntimeCache()
+            refresh()
+        end
         return
     end
 
