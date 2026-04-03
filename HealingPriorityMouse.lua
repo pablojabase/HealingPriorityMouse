@@ -157,6 +157,7 @@ local resolvedSpells = {}
 local resolvedSpellLists = {}
 local resolvedSpellLookups = {}
 local atonementCombatCache = {}
+local atonementCacheDirty = true
 
 local GLOW_RULES = {
     RenewingMist = {
@@ -2170,25 +2171,39 @@ local function findAtonementAuraOnUnit(unit)
     return nil
 end
 
+local function rebuildAtonementCombatCache()
+    for unitGUID in pairs(atonementCombatCache) do
+        atonementCombatCache[unitGUID] = nil
+    end
+
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            local aura = findAtonementAuraOnUnit(unit)
+            if aura then
+                cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+            end
+        end
+    end
+
+    atonementCacheDirty = false
+end
+
 local function countAtonementInGroup()
     pruneExpiredAtonementCombatCache()
+
+    if atonementCacheDirty then
+        rebuildAtonementCombatCache()
+    end
 
     local now = getNowTime()
     local n = 0
     for _, unit in ipairs(getGroupUnits()) do
         if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
-            local aura = findAtonementAuraOnUnit(unit)
-            if aura then
-                local expirationTime = plainNumber(aura.expirationTime)
-                cacheAtonementUnitState(unit, expirationTime, aura.auraInstanceID)
+            local unitGUID = UnitGUID(unit)
+            local cachedState = unitGUID and atonementCombatCache[unitGUID]
+            local cachedExpiration = type(cachedState) == "table" and cachedState.expirationTime or cachedState
+            if cachedExpiration and cachedExpiration > now then
                 n = n + 1
-            else
-                local unitGUID = UnitGUID(unit)
-                local cachedState = unitGUID and atonementCombatCache[unitGUID]
-                local cachedExpiration = type(cachedState) == "table" and cachedState.expirationTime or cachedState
-                if cachedExpiration and cachedExpiration > now then
-                    n = n + 1
-                end
             end
         end
     end
@@ -2225,6 +2240,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
             else
                 clearAtonementUnitStateByGUID(unitGUID)
             end
+            atonementCacheDirty = false
             return true
         end
 
@@ -2276,6 +2292,8 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
             changed = true
         end
     end
+
+    atonementCacheDirty = false
 
     return changed
 end
@@ -4374,7 +4392,18 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         return
     end
 
-    invalidateSpellRuntimeCache()
+    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "SPELLS_CHANGED" then
+        atonementCacheDirty = true
+    end
+
+    local shouldInvalidateRuntime = true
+    if event == "UNIT_AURA" or event == "UPDATE_MOUSEOVER_UNIT" or event == "GROUP_ROSTER_UPDATE" or event == "UNIT_POWER_UPDATE" then
+        shouldInvalidateRuntime = false
+    end
+
+    if shouldInvalidateRuntime then
+        invalidateSpellRuntimeCache()
+    end
 
     if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
         local castSpellID = plainNumber(arg3)
