@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-04-03
+
 ### Fixed
 - Reduced Priest combat CPU and allocation pressure by moving `Atonement` counting onto a cached `UNIT_AURA`-driven path instead of rescanning group auras during normal refreshes.
 - Stopped invalidating the shared spell runtime cache on group aura, mouseover, roster, and power events that do not actually change cooldown state.
