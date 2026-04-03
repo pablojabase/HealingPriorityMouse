@@ -143,6 +143,7 @@ local SPELLS = {
     Lifespark = { 443176 },
 
     Atonement = { 194384 },
+    AtonementAura = { 81749, 194384, 292010, 292011, 331836, 451513, 451577 },
     PowerWordShield = { 17 },
     PowerWordRadiance = { 194509 },
     Penance = { 47540 },
@@ -153,6 +154,7 @@ local SPELLS = {
 }
 
 local resolvedSpells = {}
+local resolvedSpellLists = {}
 
 local GLOW_RULES = {
     RenewingMist = {
@@ -368,6 +370,31 @@ local function resolveAnySpellID(keys)
     return false
 end
 
+local function resolveSpellIDs(key)
+    if resolvedSpellLists[key] ~= nil then
+        return resolvedSpellLists[key]
+    end
+
+    local ids = SPELLS[key]
+    if not ids then
+        resolvedSpellLists[key] = {}
+        return resolvedSpellLists[key]
+    end
+
+    local resolved = {}
+    local seen = {}
+    for _, spellID in ipairs(ids) do
+        local name = getSpellName(spellID)
+        if name and name ~= "" and not seen[spellID] then
+            seen[spellID] = true
+            resolved[#resolved + 1] = spellID
+        end
+    end
+
+    resolvedSpellLists[key] = resolved
+    return resolved
+end
+
 local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if not unit or not UnitExists(unit) then
         return false
@@ -401,10 +428,40 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
             return true
         end
 
-        local sourceOk, isPlayerSource = pcall(function()
-            return aura and aura.sourceUnit == "player"
+        local playerGUID = UnitGUID("player")
+        if not playerGUID then
+            return false
+        end
+
+        local sourceGUIDOk, sourceGUID = pcall(function()
+            return aura and aura.sourceGUID
         end)
-        return sourceOk and isPlayerSource or false
+        if sourceGUIDOk and sourceGUID and sourceGUID == playerGUID then
+            return true
+        end
+
+        local function matchesPlayerUnit(field)
+            local fieldOk, sourceUnit = pcall(function()
+                return aura and aura[field]
+            end)
+            if not fieldOk or type(sourceUnit) ~= "string" or sourceUnit == "" then
+                return false
+            end
+            local unitGUID = UnitGUID(sourceUnit)
+            return unitGUID and unitGUID == playerGUID or false
+        end
+
+        if matchesPlayerUnit("sourceUnit") then
+            return true
+        end
+        if matchesPlayerUnit("unitCaster") then
+            return true
+        end
+        if matchesPlayerUnit("casterUnit") then
+            return true
+        end
+
+        return false
     end
 
     if fromPlayer and hasAuraForFilter(baseFilter .. "|PLAYER") then
@@ -418,6 +475,26 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
     if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
         return false
     end
+    return false
+end
+
+local function isAuraConceptActive(unit, spellKey, helpful, fromPlayer)
+    local spellIDs = resolveSpellIDs(spellKey)
+    if not spellIDs or #spellIDs == 0 then
+        return false
+    end
+
+    local seenNames = {}
+    for _, spellID in ipairs(spellIDs) do
+        local spellName = getSpellName(spellID)
+        if spellName and spellName ~= "" and not seenNames[spellName] then
+            seenNames[spellName] = true
+            if isAuraActive(unit, spellID, helpful, fromPlayer) then
+                return true
+            end
+        end
+    end
+
     return false
 end
 
@@ -1871,6 +1948,16 @@ local function countAuraInGroup(spellID, fromPlayerOnly)
     return n
 end
 
+local function countAuraConceptInGroup(spellKey, fromPlayerOnly)
+    local n = 0
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) and isAuraConceptActive(unit, spellKey, true, fromPlayerOnly) then
+            n = n + 1
+        end
+    end
+    return n
+end
+
 local function countAliveGroupUnits()
     local n = 0
     for _, unit in ipairs(getGroupUnits()) do
@@ -2578,8 +2665,14 @@ local SPELL_POLICIES = {
         label = "Atonement",
         condition = "counterAlways",
         fromPlayerOnly = true,
+        auraCountKey = "AtonementAura",
         iconCount = function(_, spellID, policy)
-            local count = countAuraInGroup(spellID, policy.fromPlayerOnly)
+            local count
+            if policy.auraCountKey then
+                count = countAuraConceptInGroup(policy.auraCountKey, policy.fromPlayerOnly)
+            else
+                count = countAuraInGroup(spellID, policy.fromPlayerOnly)
+            end
             return tostring(count)
         end,
     },

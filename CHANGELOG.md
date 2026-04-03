@@ -14,6 +14,9 @@ All notable changes to this project are documented in this file.
 - Allowed tracked class spells such as `Innervate` to be added and shown from non-healer specs as long as the character knows the spell.
 - Made policy-driven counter entries such as `Atonement` addable through the tracked-spell picker even when they are not treated as normal known castable spells.
 
+### Fixed
+- Hardened Disc `Atonement` counting by matching player-owned aura variants more reliably instead of assuming a single aura identity and a single player unit token.
+
 ## [2.0.0-beta.1] - 2026-04-03
 
 ### Added
