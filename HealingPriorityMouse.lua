@@ -2102,32 +2102,23 @@ local function countAuraConceptInGroup(spellKey, fromPlayerOnly)
     return n
 end
 
-local function getGroupUnitByGUID(guid)
-    if not guid then
-        return nil
-    end
-
-    for _, unit in ipairs(getGroupUnits()) do
-        if UnitExists(unit) and UnitGUID(unit) == guid then
-            return unit
-        end
-    end
-
-    return nil
-end
-
-local function cacheAtonementUnitState(unit, expirationTime)
+local function cacheAtonementUnitState(unit, expirationTime, auraInstanceID)
     local unitGUID = unit and UnitGUID(unit)
     if not unitGUID then
         return
     end
 
+    local cachedState = {
+        auraInstanceID = plainNumber(auraInstanceID),
+    }
     if expirationTime and numberGT(expirationTime, getNowTime()) then
-        atonementCombatCache[unitGUID] = expirationTime
+        cachedState.expirationTime = expirationTime
+        atonementCombatCache[unitGUID] = cachedState
         return
     end
 
-    atonementCombatCache[unitGUID] = getNowTime() + 15
+    cachedState.expirationTime = getNowTime() + 15
+    atonementCombatCache[unitGUID] = cachedState
 end
 
 local function clearAtonementUnitStateByGUID(unitGUID)
@@ -2138,7 +2129,8 @@ end
 
 local function pruneExpiredAtonementCombatCache()
     local now = getNowTime()
-    for unitGUID, expirationTime in pairs(atonementCombatCache) do
+    for unitGUID, cachedState in pairs(atonementCombatCache) do
+        local expirationTime = type(cachedState) == "table" and cachedState.expirationTime or cachedState
         if not expirationTime or expirationTime <= now then
             atonementCombatCache[unitGUID] = nil
         end
@@ -2169,11 +2161,12 @@ local function countAtonementInGroup()
             local aura = findAtonementAuraOnUnit(unit)
             if aura then
                 local expirationTime = plainNumber(aura.expirationTime)
-                cacheAtonementUnitState(unit, expirationTime)
+                cacheAtonementUnitState(unit, expirationTime, aura.auraInstanceID)
                 n = n + 1
             else
                 local unitGUID = UnitGUID(unit)
-                local cachedExpiration = unitGUID and atonementCombatCache[unitGUID]
+                local cachedState = unitGUID and atonementCombatCache[unitGUID]
+                local cachedExpiration = type(cachedState) == "table" and cachedState.expirationTime or cachedState
                 if cachedExpiration and cachedExpiration > now then
                     n = n + 1
                 end
@@ -2190,6 +2183,82 @@ local function isAtonementAuraSpellID(spellID)
         return false
     end
     return getResolvedSpellLookup("AtonementAura").ids[id] == true
+end
+
+local function updateAtonementCacheFromUnitAura(unit, updateInfo)
+    if not unit or not UnitExists(unit) then
+        return false
+    end
+
+    local unitGUID = UnitGUID(unit)
+    if not unitGUID then
+        return false
+    end
+
+    local changed = false
+    local currentState = atonementCombatCache[unitGUID]
+
+    if type(updateInfo) == "table" then
+        if updateInfo.isFullUpdate == true then
+            local aura = findAtonementAuraOnUnit(unit)
+            if aura then
+                cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+            else
+                clearAtonementUnitStateByGUID(unitGUID)
+            end
+            return true
+        end
+
+        local removedAuraInstanceIDs = type(updateInfo.removedAuraInstanceIDs) == "table" and updateInfo.removedAuraInstanceIDs or nil
+        if removedAuraInstanceIDs and type(currentState) == "table" and currentState.auraInstanceID then
+            for _, auraInstanceID in ipairs(removedAuraInstanceIDs) do
+                if plainNumber(auraInstanceID) == currentState.auraInstanceID then
+                    clearAtonementUnitStateByGUID(unitGUID)
+                    currentState = nil
+                    changed = true
+                    break
+                end
+            end
+        end
+
+        local addedAuras = type(updateInfo.addedAuras) == "table" and updateInfo.addedAuras or nil
+        if addedAuras then
+            for _, auraData in ipairs(addedAuras) do
+                if isAtonementAuraSpellID(auraData and auraData.spellId) and isPlayerOwnedAuraData(auraData) then
+                    cacheAtonementUnitState(unit, plainNumber(auraData.expirationTime), auraData.auraInstanceID)
+                    changed = true
+                    break
+                end
+            end
+        end
+
+        local updatedAuraInstanceIDs = type(updateInfo.updatedAuraInstanceIDs) == "table" and updateInfo.updatedAuraInstanceIDs or nil
+        if updatedAuraInstanceIDs and type(currentState) == "table" and currentState.auraInstanceID then
+            for _, auraInstanceID in ipairs(updatedAuraInstanceIDs) do
+                if plainNumber(auraInstanceID) == currentState.auraInstanceID then
+                    local aura = findAtonementAuraOnUnit(unit)
+                    if aura then
+                        cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+                    else
+                        clearAtonementUnitStateByGUID(unitGUID)
+                    end
+                    changed = true
+                    break
+                end
+            end
+        end
+    else
+        local aura = findAtonementAuraOnUnit(unit)
+        if aura then
+            cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+            changed = true
+        elseif currentState then
+            clearAtonementUnitStateByGUID(unitGUID)
+            changed = true
+        end
+    end
+
+    return changed
 end
 
 local function countAliveGroupUnits()
@@ -4252,7 +4321,6 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -4274,35 +4342,16 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             return
         end
 
+        local atonementCacheChanged = updateAtonementCacheFromUnitAura(arg1, arg2)
+
         local now = getNowTime()
-        if (now - lastGroupAuraRefresh) < GROUP_AURA_REFRESH_INTERVAL then
+        if not atonementCacheChanged and (now - lastGroupAuraRefresh) < GROUP_AURA_REFRESH_INTERVAL then
             return
         end
         lastGroupAuraRefresh = now
     end
 
     if event == "UNIT_POWER_UPDATE" and arg1 ~= "player" then
-        return
-    end
-
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID = CombatLogGetCurrentEventInfo()
-        local playerGUID = UnitGUID("player")
-        if playerGUID and sourceGUID == playerGUID and isAtonementAuraSpellID(spellID) then
-            if subEvent == "SPELL_AURA_REMOVED" then
-                clearAtonementUnitStateByGUID(destGUID)
-            elseif subEvent == "SPELL_AURA_APPLIED" or subEvent == "SPELL_AURA_REFRESH" then
-                local destUnit = getGroupUnitByGUID(destGUID)
-                if destUnit then
-                    local aura = findAtonementAuraOnUnit(destUnit)
-                    cacheAtonementUnitState(destUnit, aura and plainNumber(aura.expirationTime) or nil)
-                elseif destGUID then
-                    atonementCombatCache[destGUID] = getNowTime() + 15
-                end
-            end
-            invalidateSpellRuntimeCache()
-            refresh()
-        end
         return
     end
 
