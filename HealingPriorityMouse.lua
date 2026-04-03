@@ -3164,6 +3164,19 @@ local function createOptionsFrame()
     end
 
     local frame = CreateFrame("Frame", "HealingPriorityMouseOptionsFrame", UIParent, "BasicFrameTemplateWithInset")
+    if frame.GetName and UISpecialFrames then
+        local frameName = frame:GetName()
+        local alreadyRegistered = false
+        for _, specialFrameName in ipairs(UISpecialFrames) do
+            if specialFrameName == frameName then
+                alreadyRegistered = true
+                break
+            end
+        end
+        if not alreadyRegistered then
+            table.insert(UISpecialFrames, frameName)
+        end
+    end
     frame:SetSize(760, 560)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
