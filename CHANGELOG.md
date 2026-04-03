@@ -4,35 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-03
+
 ### Added
+- Added a movable minimap button with custom texture fallback support for quick access to the in-game options window.
 - Expanded the addable tracked-spell pool for Restoration Druids with `Nature's Cure`, `Nature's Swiftness`, `Convoke the Spirits`, `Incarnation: Tree of Life`, and `Innervate`.
 - Expanded the addable tracked-spell pool for Mistweaver Monks with `Rushing Wind Kick` and `Rising Sun Kick`.
 - Added a `Remove All` tracked-spells button in the options panel to clear the current character's tracked list in one action.
 
 ### Changed
+- Rebuilt the internal spell cooldown runtime around normalized cooldown/charge reads, override-aware spell ID resolution, cached per-spell runtime state, and duration-object support while keeping the addon's recommendation capabilities the same.
+- Routed shared readiness checks, charge display decisions, combat cache handling, and icon cooldown swipe rendering through the new canonical spell runtime instead of ad hoc direct API reads.
+- Updated the minimap button interaction model so left-drag moves the icon and right-click opens options.
 - Converted built-in healer defaults into pre-populated tracked spells that can be removed by the user, instead of treating them as untouchable core-managed entries.
 - Allowed tracked class spells such as `Innervate` to be added and shown from non-healer specs as long as the character knows the spell.
 - Made policy-driven counter entries such as `Atonement` addable through the tracked-spell picker even when they are not treated as normal known castable spells.
 
 ### Fixed
+- Reduced the risk of spell display regressions caused by override spell IDs, GCD contamination, mismatched cooldown sources, and desynced cooldown-vs-charge reads.
+- Improved cooldown swipe fidelity by preferring Blizzard duration objects for real cooldowns when available instead of relying only on raw start/duration pairs.
 - Hardened Disc `Atonement` counting by matching player-owned aura variants more reliably instead of assuming a single aura identity and a single player unit token.
 - Added a Disc-specific Atonement combat fallback that uses raid-combat-aware aura scans and event-driven cache updates so the in-icon count does not stick at `0` during combat.
 - Reworked the Atonement combat fallback to use `UNIT_AURA` update info instead of direct combat-log event registration, avoiding reload-time protected-call failures on current clients.
 - Removed direct secret-string comparisons from the Atonement aura-matching path so contingent aura scans fail closed instead of throwing Midnight taint errors.
 
-## [2.0.0-beta.1] - 2026-04-03
-
-### Added
-- Added a movable minimap button with custom texture fallback support for quick access to the in-game options window.
-
-### Changed
-- Rebuilt the internal spell cooldown runtime around normalized cooldown/charge reads, override-aware spell ID resolution, cached per-spell runtime state, and duration-object support while keeping the addon's recommendation capabilities the same.
-- Routed shared readiness checks, charge display decisions, combat cache handling, and icon cooldown swipe rendering through the new canonical spell runtime instead of ad hoc direct API reads.
-- Updated the minimap button interaction model so left-drag moves the icon and right-click opens options.
-
-### Fixed
-- Reduced the risk of spell display regressions caused by override spell IDs, GCD contamination, mismatched cooldown sources, and desynced cooldown-vs-charge reads.
-- Improved cooldown swipe fidelity by preferring Blizzard duration objects for real cooldowns when available instead of relying only on raw start/duration pairs.
+### Known Issues
+- `Renewing Mist` charge overlays can still lag behind the game by a few seconds in some combat recharge scenarios, even after recent responsiveness improvements.
+- Discipline `Atonement` in-combat counting has been substantially hardened for `2.0.0`, but may still need follow-up if live aura payloads stay inconsistent on some clients.
 
 ## [1.0.15-beta.2] - 2026-03-22
 
