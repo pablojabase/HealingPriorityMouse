@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Expanded the addable tracked-spell pool for Restoration Druids with `Nature's Cure`, `Nature's Swiftness`, `Convoke the Spirits`, `Incarnation: Tree of Life`, and `Innervate`.
+- Expanded the addable tracked-spell pool for Mistweaver Monks with `Rushing Wind Kick` and `Rising Sun Kick`.
+
 ## [2.0.0-beta.1] - 2026-04-03
 
 ### Added

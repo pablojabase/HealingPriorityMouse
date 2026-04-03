@@ -115,6 +115,11 @@ end
 local SPELLS = {
     Lifebloom = { 33763 },
     CenarionWard = { 102351 },
+    NaturesCure = { 88423 },
+    NaturesSwiftness = { 132158 },
+    ConvokeTheSpirits = { 391528, 323764 },
+    IncarnationTreeOfLife = { 33891 },
+    Innervate = { 29166 },
 
     Consecration = { 26573 },
     ConsecrationAura = { 188370 },
@@ -122,6 +127,8 @@ local SPELLS = {
     HolyBulwark = { 432459, 432472 },
 
     RenewingMist = { 115151 },
+    RushingWindKick = { 467307, 468179 },
+    RisingSunKick = { 107428 },
     StrengthOfTheBlackOx = { 443112 },
 
     WaterShield = { 52127, 79949, 36816, 52128, 79950, 127939, 173164, 235976, 289211, 412686, 412687 },
@@ -1278,9 +1285,9 @@ local function addSpellOption(options, seen, spellID)
 end
 
 local CLASS_SPELL_KEYS = {
-    DRUID = { "Lifebloom", "CenarionWard" },
+    DRUID = { "Lifebloom", "CenarionWard", "NaturesCure", "NaturesSwiftness", "ConvokeTheSpirits", "IncarnationTreeOfLife", "Innervate" },
     PALADIN = { "Consecration", "HolyBulwark" },
-    MONK = { "RenewingMist", "StrengthOfTheBlackOx" },
+    MONK = { "RenewingMist", "RushingWindKick", "RisingSunKick", "StrengthOfTheBlackOx" },
     SHAMAN = { "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem" },
     EVOKER = { "Reversion", "Echo", "Lifespark" },
     PRIEST = { "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
@@ -1296,6 +1303,11 @@ local SPEC_CUSTOM_SPELL_IDS = {
         18562,  -- Swiftmend
         48438,  -- Wild Growth
         33763,  -- Lifebloom
+        88423,  -- Nature's Cure
+        132158, -- Nature's Swiftness
+        391528, -- Convoke the Spirits
+        33891,  -- Incarnation: Tree of Life
+        29166,  -- Innervate
         145205, -- Efflorescence
         102342, -- Ironbark
         740,    -- Tranquility
@@ -1318,6 +1330,8 @@ local SPEC_CUSTOM_SPELL_IDS = {
         124682, -- Enveloping Mist
         115175, -- Soothing Mist
         116849, -- Life Cocoon
+        467307, -- Rushing Wind Kick
+        107428, -- Rising Sun Kick
         322101, -- Invoke Yu'lon
     },
     [264] = { -- Restoration Shaman
@@ -4043,9 +4057,9 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         resolvedSpells = {}
         msg("spell audit for current client:")
         local keys = {
-            "Lifebloom", "CenarionWard",
+            "Lifebloom", "CenarionWard", "NaturesCure", "NaturesSwiftness", "ConvokeTheSpirits", "IncarnationTreeOfLife", "Innervate",
             "Consecration", "ConsecrationAura", "InfusionOfLight", "HolyBulwark",
-            "RenewingMist", "StrengthOfTheBlackOx",
+            "RenewingMist", "RushingWindKick", "RisingSunKick", "StrengthOfTheBlackOx",
             "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem",
             "Reversion", "Echo", "Lifespark",
             "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
