@@ -632,15 +632,6 @@ local function auraMatchesSpellLookup(auraData, lookup)
         return true
     end
 
-    local auraName = auraData.name
-    if type(auraName) == "string" and type(lookup.names) == "table" then
-        for _, candidateName in ipairs(lookup.names) do
-            if safeStringEquals(auraName, candidateName) then
-                return true
-            end
-        end
-    end
-
     return false
 end
 

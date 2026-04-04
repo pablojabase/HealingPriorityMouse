@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Removed the remaining Atonement aura-name fallback from the combat cache matcher so secret-string clients stop throwing comparison errors during `UNIT_AURA` processing.
+
 ## [2.0.1] - 2026-04-03
 
 ### Fixed
