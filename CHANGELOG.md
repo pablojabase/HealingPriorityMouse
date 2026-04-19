@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Expanded the native tracked-spell picker to include the current class's healer spell pool instead of only the active healer spec, making off-spec setup easier.
+- Added manual tracked-spell entry in the options panel via spell ID, shift-clicked spell link, or exact spell name so missing spells no longer require Lua edits.
+- Added optional borders for the main cursor-following spell icons, with both options-panel and slash-command control.
+- Added `Verdant Embrace` to the Preservation Evoker tracked-spell pool.
+
 ## [2.0.2] - 2026-04-03
 
 ### Fixed

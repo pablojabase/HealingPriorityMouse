@@ -8,7 +8,8 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 
 - Shows a compact icon row near your cursor for healer priorities.
 - Adds a movable minimap button for opening the in-game options window quickly.
-- Lets you add your own additional tracked spells from an in-game class spell dropdown (`Add` button + removable list).
+- Lets you add your own additional tracked spells from an in-game class spell dropdown or by manual spell ID / shift-clicked spell link / exact spell name.
+- Adds optional borders for the main cursor-following spell icons.
 - Keeps custom tracked spell lists character-specific to avoid cross-character bleed.
 - Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) suitable for current patch lines.
 - Does not perform protected actions (no auto-cast, no targeting automation).
@@ -24,6 +25,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm names on|off`: show or hide spell names under/over icons
 - `/hpm namepos top|bottom`: set spell name position
 - `/hpm charges on|off`: toggle charge count overlay on icons
+- `/hpm borders on|off`: toggle icon borders
 - `/hpm glow on|off`: toggle conditional icon glow highlights
 - `/hpm glowdebug on|off`: toggle glow condition debug messages
 - `/hpm audit`: verify which tracked spell IDs resolve on your current client build

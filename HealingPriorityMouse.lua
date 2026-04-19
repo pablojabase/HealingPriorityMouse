@@ -10,6 +10,7 @@ local defaults = {
     showSpellNames = false,
     spellNamePosition = "bottom", -- bottom | top
     showCharges = true,
+    showBorders = false,
     showGlows = true,
     glowDebug = false,
     devLiveLogging = false,
@@ -141,6 +142,7 @@ local SPELLS = {
     Reversion = { 366155 },
     Echo = { 364343 },
     Lifespark = { 443176 },
+    VerdantEmbrace = { 360995 },
 
     Atonement = { 194384 },
     AtonementAura = { 81749, 194384, 292010, 292011, 331836, 451513, 451577 },
@@ -1539,8 +1541,17 @@ local CLASS_SPELL_KEYS = {
     PALADIN = { "Consecration", "HolyBulwark" },
     MONK = { "RenewingMist", "RushingWindKick", "RisingSunKick", "StrengthOfTheBlackOx" },
     SHAMAN = { "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem" },
-    EVOKER = { "Reversion", "Echo", "Lifespark" },
+    EVOKER = { "Reversion", "Echo", "Lifespark", "VerdantEmbrace" },
     PRIEST = { "Atonement", "PowerWordShield", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
+}
+
+local CLASS_HEALER_SPEC_IDS = {
+    DRUID = { 105 },
+    PALADIN = { 65 },
+    MONK = { 270 },
+    SHAMAN = { 264 },
+    EVOKER = { 1468 },
+    PRIEST = { 256, 257 },
 }
 
 local getSpecID
@@ -1596,6 +1607,7 @@ local SPEC_CUSTOM_SPELL_IDS = {
     [1468] = { -- Preservation Evoker
         366155, -- Reversion
         364343, -- Echo
+        360995, -- Verdant Embrace
         355936, -- Dream Breath
         361469, -- Living Flame
         367226, -- Spiritbloom
@@ -1647,13 +1659,15 @@ local function collectKnownClassSpellOptions()
     local options = {}
     local seen = {}
 
-    local specID = getSpecID()
-    local specSpellIDs = SPEC_CUSTOM_SPELL_IDS[specID] or {}
-    for _, spellID in ipairs(specSpellIDs) do
-        addSpellOption(options, seen, spellID)
+    local classToken = select(2, UnitClass("player"))
+    local specIDs = CLASS_HEALER_SPEC_IDS[classToken] or {}
+    for _, specID in ipairs(specIDs) do
+        local specSpellIDs = SPEC_CUSTOM_SPELL_IDS[specID] or {}
+        for _, spellID in ipairs(specSpellIDs) do
+            addSpellOption(options, seen, spellID)
+        end
     end
 
-    local classToken = select(2, UnitClass("player"))
     local classKeys = CLASS_SPELL_KEYS[classToken] or {}
 
     for _, key in ipairs(classKeys) do
@@ -1666,6 +1680,42 @@ local function collectKnownClassSpellOptions()
     end)
 
     return options
+end
+
+local function trimInputText(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+    if strtrim then
+        local ok, trimmed = pcall(strtrim, value)
+        if ok and type(trimmed) == "string" then
+            return trimmed
+        end
+    end
+    return (value:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function resolveCustomSpellInputToSpellID(text)
+    local trimmed = trimInputText(text)
+    if trimmed == "" then
+        return nil
+    end
+
+    local directSpellID = trimmed:match("|Hspell:(%d+)") or trimmed:match("spell:(%d+)") or trimmed:match("^(%d+)$")
+    if directSpellID then
+        return normalizeSpellID(directSpellID)
+    end
+
+    local normalizedName = string.lower(trimmed)
+    local options = collectKnownClassSpellOptions()
+    for _, option in ipairs(options) do
+        local spellName = getSpellName(option.spellID)
+        if isUsableString(spellName) and string.lower(spellName) == normalizedName then
+            return option.spellID
+        end
+    end
+
+    return nil
 end
 
 local function addCustomTrackedSpell(spellID)
@@ -2386,6 +2436,15 @@ local function ensureIcon(index)
     tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     frame.icon = tex
 
+    local border = frame:CreateTexture(nil, "OVERLAY", nil, 1)
+    border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    border:SetBlendMode("BLEND")
+    border:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    border:SetSize(36, 36)
+    border:SetVertexColor(0.96, 0.82, 0.32, 0.95)
+    border:Hide()
+    frame.border = border
+
     local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
     cd:SetAllPoints()
     cd:SetDrawBling(false)
@@ -2430,6 +2489,17 @@ local function ensureIcon(index)
 
     iconFrames[index] = frame
     return frame
+end
+
+local function setIconBorder(frame, enabled)
+    if not (frame and frame.border) then
+        return
+    end
+    if enabled then
+        frame.border:Show()
+    else
+        frame.border:Hide()
+    end
 end
 
 local function hideAllIcons()
@@ -3322,12 +3392,14 @@ local function layoutEntries(entries)
 
     local spacing = 4
     local size = 26 * (HealingPriorityMouseDB.scale or 1)
+    local showBorders = HealingPriorityMouseDB.showBorders and true or false
     for i = 1, #entries do
         local f = ensureIcon(i)
         f:SetScale(HealingPriorityMouseDB.scale or 1)
         f:ClearAllPoints()
         f:SetPoint("LEFT", root, "LEFT", (i - 1) * (size + spacing), 0)
         f.icon:SetTexture(entries[i].icon)
+        setIconBorder(f, showBorders)
 
         local opacity = clampOpacity(tonumber(HealingPriorityMouseDB.opacity) or 1.0) or 1.0
         f.icon:SetAlpha(opacity)
@@ -3405,6 +3477,7 @@ local function layoutEntries(entries)
 
     for i = #entries + 1, #iconFrames do
         setIconGlow(iconFrames[i], false)
+        setIconBorder(iconFrames[i], false)
         iconFrames[i]:Hide()
     end
 end
@@ -3501,6 +3574,7 @@ refreshOptionsControls = function()
     local db = HealingPriorityMouseDB
     optionsControls.enabled:SetChecked(db.enabled and true or false)
     optionsControls.charges:SetChecked(db.showCharges and true or false)
+    optionsControls.borders:SetChecked(db.showBorders and true or false)
     optionsControls.glows:SetChecked(db.showGlows and true or false)
     optionsControls.showNames:SetChecked(db.showSpellNames and true or false)
 
@@ -3540,11 +3614,14 @@ refreshOptionsControls = function()
 
         if selectedSpellID then
             UIDropDownMenu_SetText(optionsControls.customSpellDropdown, getSpellLabel(selectedSpellID))
-            optionsControls.addSpellButton:Enable()
         else
-            UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "All addable spells already tracked")
-            optionsControls.addSpellButton:Disable()
+            if #spellOptions > 0 then
+                UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "Select a built-in class spell")
+            else
+                UIDropDownMenu_SetText(optionsControls.customSpellDropdown, "All built-in class spells already tracked")
+            end
         end
+        optionsControls.addSpellButton:Enable()
     end
 
     if optionsControls.customSpellRows then
@@ -3773,8 +3850,16 @@ local function createOptionsFrame()
         refresh()
     end)
 
+    local borders = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    borders:SetPoint("TOPLEFT", charges, "BOTTOMLEFT", 0, -8)
+    borders.Text:SetText("Show icon borders")
+    borders:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.showBorders = self:GetChecked() and true or false
+        refresh()
+    end)
+
     local glows = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
-    glows:SetPoint("TOPLEFT", charges, "BOTTOMLEFT", 0, -8)
+    glows:SetPoint("TOPLEFT", borders, "BOTTOMLEFT", 0, -8)
     glows.Text:SetText("Show glows")
     glows:SetScript("OnClick", function(self)
         HealingPriorityMouseDB.showGlows = self:GetChecked() and true or false
@@ -3941,12 +4026,24 @@ local function createOptionsFrame()
     addSpellButton:SetSize(64, 24)
     addSpellButton:SetText("Add")
 
+    local customSpellInputLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    customSpellInputLabel:SetText("Add manually by spell ID, shift-clicked spell link, or exact spell name")
+
+    local customSpellInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    customSpellInput:SetSize(220, 24)
+    customSpellInput:SetAutoFocus(false)
+    customSpellInput:SetNumeric(false)
+    customSpellInput:SetMaxLetters(160)
+    customSpellInput:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+
     local removeAllSpellsButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     removeAllSpellsButton:SetSize(100, 24)
     removeAllSpellsButton:SetText("Remove All")
 
     local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    customSpellHint:SetText("Defaults are pre-populated per healer spec, but any tracked spell can be removed and class spells can be added for this character.")
+    customSpellHint:SetText("Defaults are pre-populated per healer spec, built-in class spells can be added from the dropdown, and manual entry lets you track missing spells without editing Lua.")
 
     local customSpellListScroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     local customSpellListContent = CreateFrame("Frame", nil, customSpellListScroll)
@@ -4003,8 +4100,15 @@ local function createOptionsFrame()
         addSpellButton:ClearAllPoints()
         addSpellButton:SetPoint("LEFT", customSpellDropdown, "RIGHT", -4, 2)
 
+        customSpellInputLabel:ClearAllPoints()
+        customSpellInputLabel:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -8)
+
+        customSpellInput:ClearAllPoints()
+        customSpellInput:SetPoint("TOPLEFT", customSpellInputLabel, "BOTTOMLEFT", 0, -6)
+        customSpellInput:SetWidth(math.max(170, width - rightColumnLeft - 50))
+
         removeAllSpellsButton:ClearAllPoints()
-        removeAllSpellsButton:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -6)
+        removeAllSpellsButton:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
 
         customSpellHint:ClearAllPoints()
         customSpellHint:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 0, -8)
@@ -4051,9 +4155,27 @@ local function createOptionsFrame()
     end
 
     local function handleAddCustomSpell()
-        local spellID = optionsControls and optionsControls.selectedCustomSpellID
+        local customInput = optionsControls and optionsControls.customSpellInput
+        local manualText = trimInputText(customInput and customInput:GetText() or "")
+        local usingManualInput = (manualText ~= "")
+        local spellID = optionsControls and optionsControls.selectedCustomSpellID or nil
+        if usingManualInput then
+            spellID = resolveCustomSpellInputToSpellID(manualText)
+        end
+        if not spellID then
+            if usingManualInput then
+                msg("enter a valid spell ID, shift-clicked spell link, or exact spell name")
+            else
+                msg("select a spell from the dropdown or enter one manually")
+            end
+            return
+        end
         local ok, reason = addCustomTrackedSpell(spellID)
         if ok then
+            if usingManualInput and customInput then
+                customInput:SetText("")
+                customInput:ClearFocus()
+            end
             refresh()
             refreshOptionsControls()
             return
@@ -4061,13 +4183,22 @@ local function createOptionsFrame()
         if reason == "duplicate" then
             msg("that spell is already tracked")
         elseif reason == "not-found" then
-            msg("selected spell is not available on this client")
+            if usingManualInput then
+                msg("that spell could not be resolved on this client")
+            else
+                msg("selected spell is not available on this client")
+            end
+        elseif reason == "invalid" then
+            msg("enter a valid spell ID, shift-clicked spell link, or exact spell name")
         else
-            msg("select a spell from the dropdown first")
+            msg("select a spell from the dropdown or enter one manually")
         end
     end
 
     addSpellButton:SetScript("OnClick", function()
+        handleAddCustomSpell()
+    end)
+    customSpellInput:SetScript("OnEnterPressed", function()
         handleAddCustomSpell()
     end)
 
@@ -4109,6 +4240,7 @@ local function createOptionsFrame()
     optionsControls = {
         enabled = enabled,
         charges = charges,
+        borders = borders,
         glows = glows,
         showNames = showNames,
         namePosition = namePosition,
@@ -4117,6 +4249,7 @@ local function createOptionsFrame()
         opacitySlider = opacitySlider,
         opacityInput = opacityInput,
         customSpellDropdown = customSpellDropdown,
+        customSpellInput = customSpellInput,
         customSpellOptions = {},
         selectedCustomSpellID = nil,
         addSpellButton = addSpellButton,
@@ -4127,11 +4260,11 @@ local function createOptionsFrame()
         customSpellEmpty = customSpellEmpty,
         liveLoggingToggle = liveLoggingToggle,
         generalWidgets = {
-            enabled, charges, glows, showNames,
+            enabled, charges, borders, glows, showNames,
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
-            customSpellsLabel, customSpellDropdown, addSpellButton, removeAllSpellsButton,
+            customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, removeAllSpellsButton,
             customSpellHint, customSpellListScroll,
         },
         devWidgets = {
@@ -4533,6 +4666,25 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
+    if cmd == "borders" then
+        if rest == "on" then
+            HealingPriorityMouseDB.showBorders = true
+            msg("showBorders = true")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        if rest == "off" then
+            HealingPriorityMouseDB.showBorders = false
+            msg("showBorders = false")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        msg("usage: /hpm borders on|off")
+        return
+    end
+
     if cmd == "glow" then
         if rest == "on" then
             HealingPriorityMouseDB.showGlows = true
@@ -4602,7 +4754,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             "Consecration", "ConsecrationAura", "InfusionOfLight", "HolyBulwark",
             "RenewingMist", "RushingWindKick", "RisingSunKick", "StrengthOfTheBlackOx",
             "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem",
-            "Reversion", "Echo", "Lifespark",
+            "Reversion", "Echo", "Lifespark", "VerdantEmbrace",
             "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance", "PrayerOfMending", "Halo", "Lightweaver", "Premonitions",
         }
         for _, key in ipairs(keys) do
@@ -4642,6 +4794,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         .. ", scale=" .. tostring(HealingPriorityMouseDB.scale)
         .. ", opacity=" .. tostring(math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)) .. "%"
         .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges)
+        .. ", showBorders=" .. tostring(HealingPriorityMouseDB.showBorders)
         .. ", showGlows=" .. tostring(HealingPriorityMouseDB.showGlows)
         .. ", glowDebug=" .. tostring(HealingPriorityMouseDB.glowDebug)
         .. ", showSpellNames=" .. tostring(HealingPriorityMouseDB.showSpellNames)
