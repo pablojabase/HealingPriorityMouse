@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.3-beta.1] - 2026-04-18
+
 ### Added
 - Expanded the native tracked-spell picker to include the current class's healer spell pool instead of only the active healer spec, making off-spec setup easier.
 - Added manual tracked-spell entry in the options panel via spell ID, shift-clicked spell link, or exact spell name so missing spells no longer require Lua edits.
