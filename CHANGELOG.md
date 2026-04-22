@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-04-22
+
+### Fixed
+- Hardened additional secret/tainted-value read paths beyond the initial `2.0.3` scope, including cooldown/charge table normalization, duration-object diagnostic reads, and Atonement cache key access.
+- Added guarded equality and unit-resolution checks in aura ownership matching to reduce new 12.0.5 secret-value comparison/indexing errors reported by users.
+
 ## [2.0.3] - 2026-04-22
 
 ### Added

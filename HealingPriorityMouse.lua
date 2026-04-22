@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "2.0.3"
+local ADDON_VERSION = "2.0.4"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
