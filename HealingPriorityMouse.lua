@@ -604,6 +604,14 @@ local function getSafeTableField(tbl, key)
     return nil
 end
 
+local function getSafeTableFieldAsTable(tbl, key)
+    local value = getSafeTableField(tbl, key)
+    if type(value) == "table" then
+        return value
+    end
+    return nil
+end
+
 local function getAuraDataSpellID(auraData)
     return plainNumber(getSafeTableField(auraData, "spellId"))
 end
@@ -2300,7 +2308,8 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
     local currentState = atonementCombatCache[unitGUID]
 
     if type(updateInfo) == "table" then
-        if updateInfo.isFullUpdate == true then
+        local isFullUpdate = getSafeTableField(updateInfo, "isFullUpdate") == true
+        if isFullUpdate then
             local aura = findAtonementAuraOnUnit(unit)
             if aura then
                 cacheAtonementUnitState(unit, getAuraDataExpirationTime(aura), getAuraDataInstanceID(aura))
@@ -2311,7 +2320,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
             return true
         end
 
-        local removedAuraInstanceIDs = type(updateInfo.removedAuraInstanceIDs) == "table" and updateInfo.removedAuraInstanceIDs or nil
+        local removedAuraInstanceIDs = getSafeTableFieldAsTable(updateInfo, "removedAuraInstanceIDs")
         if removedAuraInstanceIDs and type(currentState) == "table" and currentState.auraInstanceID then
             for _, auraInstanceID in ipairs(removedAuraInstanceIDs) do
                 if plainNumber(auraInstanceID) == currentState.auraInstanceID then
@@ -2323,7 +2332,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
             end
         end
 
-        local addedAuras = type(updateInfo.addedAuras) == "table" and updateInfo.addedAuras or nil
+        local addedAuras = getSafeTableFieldAsTable(updateInfo, "addedAuras")
         if addedAuras then
             for _, auraData in ipairs(addedAuras) do
                 if isAtonementAuraSpellID(getAuraDataSpellID(auraData)) and isPlayerOwnedAuraData(auraData) then
@@ -2334,7 +2343,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
             end
         end
 
-        local updatedAuraInstanceIDs = type(updateInfo.updatedAuraInstanceIDs) == "table" and updateInfo.updatedAuraInstanceIDs or nil
+        local updatedAuraInstanceIDs = getSafeTableFieldAsTable(updateInfo, "updatedAuraInstanceIDs")
         if updatedAuraInstanceIDs and type(currentState) == "table" and currentState.auraInstanceID then
             for _, auraInstanceID in ipairs(updatedAuraInstanceIDs) do
                 if plainNumber(auraInstanceID) == currentState.auraInstanceID then
