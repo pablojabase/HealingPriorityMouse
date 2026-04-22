@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-04-22
+
+### Added
+- Promoted `2.0.3-beta.1` tracked-spell and icon-border improvements to full release.
+
+### Fixed
+- Hardened AuraData field reads in the Atonement cache/count paths to avoid `12.0.5` secret-key indexing errors in combat/encounter-restricted contexts.
+
+### Changed
+- Updated addon compatibility metadata for Retail `12.0.5` by setting TOC `Interface` to `120005`.
+
 ## [2.0.3-beta.1] - 2026-04-18
 
 ### Added

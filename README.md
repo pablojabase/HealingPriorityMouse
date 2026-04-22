@@ -11,7 +11,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - Lets you add your own additional tracked spells from an in-game class spell dropdown or by manual spell ID / shift-clicked spell link / exact spell name.
 - Adds optional borders for the main cursor-following spell icons.
 - Keeps custom tracked spell lists character-specific to avoid cross-character bleed.
-- Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) suitable for current patch lines.
+- Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) and is updated for Retail `12.0.5` (`Interface: 120005`).
 - Does not perform protected actions (no auto-cast, no targeting automation).
 
 ## Slash Commands

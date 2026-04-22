@@ -1,4 +1,4 @@
-## Interface: 120001
+## Interface: 120005
 ## Title: HealingPriorityMouse
 ## Notes: Mouse-anchored healing priority helper (display-only)
 ## Author: Local Conversion

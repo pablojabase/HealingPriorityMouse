@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "2.0.3-beta.1"
+local ADDON_VERSION = "2.0.3"
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -591,16 +591,41 @@ local function enumerateUnitAuras(unit, filter, callback)
     return false
 end
 
+local function getSafeTableField(tbl, key)
+    if type(tbl) ~= "table" then
+        return nil
+    end
+    local ok, value = pcall(function()
+        return tbl[key]
+    end)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+local function getAuraDataSpellID(auraData)
+    return plainNumber(getSafeTableField(auraData, "spellId"))
+end
+
+local function getAuraDataExpirationTime(auraData)
+    return plainNumber(getSafeTableField(auraData, "expirationTime"))
+end
+
+local function getAuraDataInstanceID(auraData)
+    return plainNumber(getSafeTableField(auraData, "auraInstanceID"))
+end
+
 local function isPlayerOwnedAuraData(auraData)
     if type(auraData) ~= "table" then
         return false
     end
 
-    if auraData.isFromPlayerOrPlayerPet == true then
+    if getSafeTableField(auraData, "isFromPlayerOrPlayerPet") == true then
         return true
     end
 
-    local sourceUnit = auraData.sourceUnit
+    local sourceUnit = getSafeTableField(auraData, "sourceUnit")
     if type(sourceUnit) == "string" and sourceUnit ~= "" then
         if UnitIsUnit and UnitIsUnit(sourceUnit, "player") then
             return true
@@ -611,7 +636,7 @@ local function isPlayerOwnedAuraData(auraData)
     end
 
     local playerGUID = UnitGUID("player")
-    local sourceGUID = auraData.sourceGUID
+    local sourceGUID = getSafeTableField(auraData, "sourceGUID")
     return playerGUID and sourceGUID and sourceGUID == playerGUID or false
 end
 
@@ -629,7 +654,7 @@ local function auraMatchesSpellLookup(auraData, lookup)
         return false
     end
 
-    local auraSpellID = plainNumber(auraData.spellId)
+    local auraSpellID = getAuraDataSpellID(auraData)
     if auraSpellID and lookup.ids[auraSpellID] then
         return true
     end
@@ -1874,12 +1899,13 @@ local function getAuraStackCountSafe(unit, spellID, helpful, fromPlayer)
         return nil
     end
 
-    local applications = plainNumber(aura.applications)
+    local applicationsValue = getSafeTableField(aura, "applications")
+    local applications = plainNumber(applicationsValue)
     if applications then
         return applications
     end
 
-    if not isNilValue(aura.applications) then
+    if not isNilValue(applicationsValue) then
         return nil
     end
 
@@ -2221,7 +2247,7 @@ local function rebuildAtonementCombatCache()
         if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
             local aura = findAtonementAuraOnUnit(unit)
             if aura then
-                cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+                cacheAtonementUnitState(unit, getAuraDataExpirationTime(aura), getAuraDataInstanceID(aura))
             end
         end
     end
@@ -2277,7 +2303,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
         if updateInfo.isFullUpdate == true then
             local aura = findAtonementAuraOnUnit(unit)
             if aura then
-                cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+                cacheAtonementUnitState(unit, getAuraDataExpirationTime(aura), getAuraDataInstanceID(aura))
             else
                 clearAtonementUnitStateByGUID(unitGUID)
             end
@@ -2300,8 +2326,8 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
         local addedAuras = type(updateInfo.addedAuras) == "table" and updateInfo.addedAuras or nil
         if addedAuras then
             for _, auraData in ipairs(addedAuras) do
-                if isAtonementAuraSpellID(auraData and auraData.spellId) and isPlayerOwnedAuraData(auraData) then
-                    cacheAtonementUnitState(unit, plainNumber(auraData.expirationTime), auraData.auraInstanceID)
+                if isAtonementAuraSpellID(getAuraDataSpellID(auraData)) and isPlayerOwnedAuraData(auraData) then
+                    cacheAtonementUnitState(unit, getAuraDataExpirationTime(auraData), getAuraDataInstanceID(auraData))
                     changed = true
                     break
                 end
@@ -2314,7 +2340,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
                 if plainNumber(auraInstanceID) == currentState.auraInstanceID then
                     local aura = findAtonementAuraOnUnit(unit)
                     if aura then
-                        cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+                        cacheAtonementUnitState(unit, getAuraDataExpirationTime(aura), getAuraDataInstanceID(aura))
                     else
                         clearAtonementUnitStateByGUID(unitGUID)
                     end
@@ -2326,7 +2352,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
     else
         local aura = findAtonementAuraOnUnit(unit)
         if aura then
-            cacheAtonementUnitState(unit, plainNumber(aura.expirationTime), aura.auraInstanceID)
+            cacheAtonementUnitState(unit, getAuraDataExpirationTime(aura), getAuraDataInstanceID(aura))
             changed = true
         elseif currentState then
             clearAtonementUnitStateByGUID(unitGUID)
