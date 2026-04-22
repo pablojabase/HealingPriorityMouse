@@ -489,7 +489,8 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
         local sourceGUIDOk, sourceGUID = pcall(function()
             return aura and aura.sourceGUID
         end)
-        if sourceGUIDOk and sourceGUID and sourceGUID == playerGUID then
+        local sourceMatchesPlayerGUID = sourceGUIDOk and safeStringEquals(sourceGUID, playerGUID)
+        if sourceMatchesPlayerGUID then
             return true
         end
 
@@ -497,11 +498,14 @@ local function isAuraActive(unit, spellID, helpful, fromPlayer)
             local fieldOk, sourceUnit = pcall(function()
                 return aura and aura[field]
             end)
-            if not fieldOk or type(sourceUnit) ~= "string" or sourceUnit == "" then
+            if not fieldOk or type(sourceUnit) ~= "string" then
                 return false
             end
-            local unitGUID = UnitGUID(sourceUnit)
-            return unitGUID and unitGUID == playerGUID or false
+            local unitGUIDOk, unitGUID = pcall(UnitGUID, sourceUnit)
+            if not unitGUIDOk or not unitGUID then
+                return false
+            end
+            return safeStringEquals(unitGUID, playerGUID)
         end
 
         if matchesPlayerUnit("sourceUnit") then
@@ -612,6 +616,16 @@ local function getSafeTableFieldAsTable(tbl, key)
     return nil
 end
 
+local function setSafeTableField(tbl, key, value)
+    if type(tbl) ~= "table" then
+        return false
+    end
+    local ok = pcall(function()
+        tbl[key] = value
+    end)
+    return ok == true
+end
+
 local function getAuraDataSpellID(auraData)
     return plainNumber(getSafeTableField(auraData, "spellId"))
 end
@@ -634,18 +648,27 @@ local function isPlayerOwnedAuraData(auraData)
     end
 
     local sourceUnit = getSafeTableField(auraData, "sourceUnit")
-    if type(sourceUnit) == "string" and sourceUnit ~= "" then
-        if UnitIsUnit and UnitIsUnit(sourceUnit, "player") then
-            return true
+    if type(sourceUnit) == "string" then
+        if UnitIsUnit then
+            local unitIsUnitOk, isPlayerUnit = pcall(UnitIsUnit, sourceUnit, "player")
+            if unitIsUnitOk and isPlayerUnit then
+                return true
+            end
         end
-        if UnitIsOwnerOrControllerOfUnit and UnitIsOwnerOrControllerOfUnit("player", sourceUnit) then
-            return true
+        if UnitIsOwnerOrControllerOfUnit then
+            local ownershipOk, isOwnedByPlayer = pcall(UnitIsOwnerOrControllerOfUnit, "player", sourceUnit)
+            if ownershipOk and isOwnedByPlayer then
+                return true
+            end
         end
     end
 
     local playerGUID = UnitGUID("player")
     local sourceGUID = getSafeTableField(auraData, "sourceGUID")
-    return playerGUID and sourceGUID and sourceGUID == playerGUID or false
+    if not (playerGUID and sourceGUID) then
+        return false
+    end
+    return safeStringEquals(sourceGUID, playerGUID)
 end
 
 local function getAtonementAuraFilter(unit)
@@ -822,8 +845,8 @@ local function isNodeRankActive(nodeInfo)
         return false
     end
     -- Talent node ranks can also be protected/secret values in Midnight.
-    local ranksPurchased = plainNumber(nodeInfo.ranksPurchased) or 0
-    local activeRank = plainNumber(nodeInfo.activeRank) or 0
+    local ranksPurchased = plainNumber(getSafeTableField(nodeInfo, "ranksPurchased")) or 0
+    local activeRank = plainNumber(getSafeTableField(nodeInfo, "activeRank")) or 0
     return numberGT(ranksPurchased, 0) or numberGT(activeRank, 0)
 end
 
@@ -973,22 +996,23 @@ end
 
 local function normalizeCooldownInfo(rawValue, rawDuration, rawEnabled, rawModRate)
     if type(rawValue) == "table" then
-        local startTime = plainNumber(rawValue.startTime)
-        local duration = plainNumber(rawValue.duration)
-        local hasExplicitGCD = isTrueFlag(rawValue.isOnGCD, false)
+        local startTime = plainNumber(getSafeTableField(rawValue, "startTime"))
+        local duration = plainNumber(getSafeTableField(rawValue, "duration"))
+        local hasExplicitGCD = isTrueFlag(getSafeTableField(rawValue, "isOnGCD"), false)
         if type(startTime) ~= "number" and type(duration) ~= "number" and not hasExplicitGCD then
             return nil
         end
 
-        local modRate = plainNumber(rawValue.modRate)
+        local modRate = plainNumber(getSafeTableField(rawValue, "modRate"))
         if not (modRate and numberGT(modRate, 0)) then
             modRate = 1
         end
 
         local isEnabled
-        if isTrueFlag(rawValue.isEnabled, false) then
+        local isEnabledValue = getSafeTableField(rawValue, "isEnabled")
+        if isTrueFlag(isEnabledValue, false) then
             isEnabled = true
-        elseif isFalseFlag(rawValue.isEnabled, false) then
+        elseif isFalseFlag(isEnabledValue, false) then
             isEnabled = false
         end
 
@@ -998,8 +1022,8 @@ local function normalizeCooldownInfo(rawValue, rawDuration, rawEnabled, rawModRa
             isEnabled = isEnabled,
             modRate = modRate,
             isOnGCD = hasExplicitGCD and true or nil,
-            activeCategory = plainNumber(rawValue.activeCategory),
-            timeUntilEndOfStartRecovery = plainNumber(rawValue.timeUntilEndOfStartRecovery),
+            activeCategory = plainNumber(getSafeTableField(rawValue, "activeCategory")),
+            timeUntilEndOfStartRecovery = plainNumber(getSafeTableField(rawValue, "timeUntilEndOfStartRecovery")),
         }
     end
 
@@ -1034,13 +1058,13 @@ end
 
 local function normalizeChargesInfo(rawValue, rawMax, rawRechargeStart, rawRechargeDuration, rawChargeModRate)
     if type(rawValue) == "table" then
-        local current = plainNumber(rawValue.currentCharges)
-        local max = plainNumber(rawValue.maxCharges)
+        local current = plainNumber(getSafeTableField(rawValue, "currentCharges"))
+        local max = plainNumber(getSafeTableField(rawValue, "maxCharges"))
         if type(current) ~= "number" and type(max) ~= "number" then
             return nil
         end
 
-        local chargeModRate = plainNumber(rawValue.chargeModRate)
+        local chargeModRate = plainNumber(getSafeTableField(rawValue, "chargeModRate"))
         if not (chargeModRate and numberGT(chargeModRate, 0)) then
             chargeModRate = 1
         end
@@ -1048,8 +1072,8 @@ local function normalizeChargesInfo(rawValue, rawMax, rawRechargeStart, rawRecha
         return {
             current = current,
             max = max,
-            rechargeStart = plainNumber(rawValue.cooldownStartTime),
-            rechargeDuration = plainNumber(rawValue.cooldownDuration),
+            rechargeStart = plainNumber(getSafeTableField(rawValue, "cooldownStartTime")),
+            rechargeDuration = plainNumber(getSafeTableField(rawValue, "cooldownDuration")),
             chargeModRate = chargeModRate,
             unknown = false,
         }
@@ -1123,7 +1147,7 @@ local function getChargesInfoBySpellID(spellID)
             end
         end
 
-        if rawCharges and (not isNilValue(rawCharges.currentCharges) or not isNilValue(rawCharges.maxCharges)) then
+        if rawCharges and (not isNilValue(getSafeTableField(rawCharges, "currentCharges")) or not isNilValue(getSafeTableField(rawCharges, "maxCharges"))) then
             return {
                 unknown = true,
             }
@@ -2208,17 +2232,17 @@ local function cacheAtonementUnitState(unit, expirationTime, auraInstanceID)
     }
     if expirationTime and numberGT(expirationTime, getNowTime()) then
         cachedState.expirationTime = expirationTime
-        atonementCombatCache[unitGUID] = cachedState
+        setSafeTableField(atonementCombatCache, unitGUID, cachedState)
         return
     end
 
     cachedState.expirationTime = getNowTime() + 15
-    atonementCombatCache[unitGUID] = cachedState
+    setSafeTableField(atonementCombatCache, unitGUID, cachedState)
 end
 
 local function clearAtonementUnitStateByGUID(unitGUID)
     if unitGUID then
-        atonementCombatCache[unitGUID] = nil
+        setSafeTableField(atonementCombatCache, unitGUID, nil)
     end
 end
 
@@ -2275,7 +2299,7 @@ local function countAtonementInGroup()
     for _, unit in ipairs(getGroupUnits()) do
         if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
             local unitGUID = UnitGUID(unit)
-            local cachedState = unitGUID and atonementCombatCache[unitGUID]
+            local cachedState = unitGUID and getSafeTableField(atonementCombatCache, unitGUID)
             local cachedExpiration = type(cachedState) == "table" and cachedState.expirationTime or cachedState
             if cachedExpiration and cachedExpiration > now then
                 n = n + 1
@@ -2305,7 +2329,7 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
     end
 
     local changed = false
-    local currentState = atonementCombatCache[unitGUID]
+    local currentState = getSafeTableField(atonementCombatCache, unitGUID)
 
     if type(updateInfo) == "table" then
         local isFullUpdate = getSafeTableField(updateInfo, "isFullUpdate") == true
@@ -2832,7 +2856,12 @@ local function getDurationObjectValue(durationObject, methodName, ...)
     if not durationObject then
         return nil
     end
-    local method = durationObject[methodName]
+    local methodOk, method = pcall(function()
+        return durationObject[methodName]
+    end)
+    if not methodOk then
+        return nil
+    end
     if type(method) ~= "function" then
         return nil
     end
@@ -2888,13 +2917,13 @@ local function dumpSpellAPIDiagnostics(spellID)
     end
 
     local cooldownFields = {}
-    appendDiagnosticField(cooldownFields, "startTime", cooldownInfo and cooldownInfo.startTime)
-    appendDiagnosticField(cooldownFields, "duration", cooldownInfo and cooldownInfo.duration)
-    appendDiagnosticField(cooldownFields, "isEnabled", cooldownInfo and cooldownInfo.isEnabled)
-    appendDiagnosticField(cooldownFields, "modRate", cooldownInfo and cooldownInfo.modRate)
-    appendDiagnosticField(cooldownFields, "isOnGCD", cooldownInfo and cooldownInfo.isOnGCD)
-    appendDiagnosticField(cooldownFields, "activeCategory", cooldownInfo and cooldownInfo.activeCategory)
-    appendDiagnosticField(cooldownFields, "timeUntilEndOfStartRecovery", cooldownInfo and cooldownInfo.timeUntilEndOfStartRecovery)
+    appendDiagnosticField(cooldownFields, "startTime", getSafeTableField(cooldownInfo, "startTime"))
+    appendDiagnosticField(cooldownFields, "duration", getSafeTableField(cooldownInfo, "duration"))
+    appendDiagnosticField(cooldownFields, "isEnabled", getSafeTableField(cooldownInfo, "isEnabled"))
+    appendDiagnosticField(cooldownFields, "modRate", getSafeTableField(cooldownInfo, "modRate"))
+    appendDiagnosticField(cooldownFields, "isOnGCD", getSafeTableField(cooldownInfo, "isOnGCD"))
+    appendDiagnosticField(cooldownFields, "activeCategory", getSafeTableField(cooldownInfo, "activeCategory"))
+    appendDiagnosticField(cooldownFields, "timeUntilEndOfStartRecovery", getSafeTableField(cooldownInfo, "timeUntilEndOfStartRecovery"))
     emitDiagnosticLine("apidump cooldown", cooldownFields)
 
     local legacyStartTime
