@@ -2840,7 +2840,17 @@ local function getAvailableMultiChargeState(spellID)
     end
 
     if charges.unknown then
-        return false
+        local estimated = estimateChargeStateFromCache(spellID)
+        if estimated and estimated.current and estimated.max and numberGT(estimated.max, 1) then
+            return numberGT(estimated.current, 0)
+        end
+
+        local cached = getCachedGlowState(spellID)
+        if cached and cached.current and cached.max and numberGT(cached.max, 1) then
+            return numberGT(cached.current, 0)
+        end
+
+        return nil
     end
 
     local current = charges.current
@@ -2899,6 +2909,46 @@ local function applyChargeSpendToCache(spellID, liveCharges)
     end
 
     updateCachedGlowState(spellID, patch)
+end
+
+runtimeServices.mirrorChargeCacheToRuntimeCandidates = function(spellID, runtimeState)
+    local cached = getCachedGlowState(spellID)
+    if not cached then
+        return
+    end
+
+    local patch = {
+        current = cached.current,
+        max = cached.max,
+        rechargeStart = cached.rechargeStart,
+        rechargeDuration = cached.rechargeDuration,
+        chargeModRate = cached.chargeModRate,
+        chargeTime = cached.chargeTime,
+        lastSpendTime = cached.lastSpendTime,
+        cooldownReady = cached.cooldownReady,
+    }
+
+    local seen = {}
+    local function mirror(targetSpellID)
+        local normalized = plainNumber(targetSpellID)
+        if not normalized then
+            return
+        end
+        if normalized == spellID or seen[normalized] then
+            return
+        end
+        seen[normalized] = true
+        updateCachedGlowState(normalized, patch)
+    end
+
+    mirror(runtimeState and runtimeState.chargesSourceSpellID)
+    mirror(runtimeState and runtimeState.cooldownSourceSpellID)
+    local candidates = runtimeState and runtimeState.candidateSpellIDs
+    if type(candidates) == "table" then
+        for index = 1, #candidates do
+            mirror(candidates[index])
+        end
+    end
 end
 
 local function hasAvailableChargeOrReady(spellID)
@@ -5042,6 +5092,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             local hasLiveChargeState = liveCharges and not liveCharges.unknown and liveCharges.current and liveCharges.max
             if hasLiveChargeState and liveCharges.max and numberGT(liveCharges.max, 1) then
                 applyChargeSpendToCache(castSpellID, liveCharges)
+                runtimeServices.mirrorChargeCacheToRuntimeCandidates(castSpellID, castState)
             elseif hasLiveChargeState then
                 cacheChargeState(castSpellID, liveCharges)
             end
@@ -5052,6 +5103,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
             if cachedCharges and cachedCharges.current and cachedCharges.max and numberGT(cachedCharges.max, 1) then
                 applyChargeSpendToCache(castSpellID, cachedCharges)
+                runtimeServices.mirrorChargeCacheToRuntimeCandidates(castSpellID, castState)
             end
 
             if isSpellInTrackedList(castSpellID) then

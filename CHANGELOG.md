@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 - Hardened cast-time readiness transitions for tracked single-cooldown spells (for example `Lay on Hands`) so combat cast events immediately fail closed instead of briefly reusing stale ready cache state.
+- Reduced multi-charge icon flicker after spending one charge by reusing cached/estimated charge state during transient unknown payloads and mirroring cast-updated charge cache across runtime candidate spell IDs.
 
 ## [2.0.4] - 2026-04-22
 
