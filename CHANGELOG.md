@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Refined tracked-spell options layout so manual-add controls and helper text stay within the options window bounds on resize.
+
+### Fixed
+- Added explicit shift-click spell-link insertion support for the manual tracked-spell input when that box is focused.
+- Improved manual spell-name resolution by using direct spell identifier/name APIs before class-option fallback.
+
 ## [2.1.0] - 2026-04-23
 
 ### Added

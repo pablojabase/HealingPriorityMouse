@@ -179,6 +179,28 @@ runtimeServices.getProviderStatusSummary = function(logger)
     return "Provider: " .. mode .. " | rev " .. revision .. " | tracked " .. trackedCount .. " | " .. dirty
 end
 
+runtimeServices.installCustomSpellLinkInsertHook = function(editBox)
+    runtimeServices.customSpellInput = editBox
+    if runtimeServices.customSpellLinkHookInstalled then
+        return
+    end
+
+    if type(ChatEdit_InsertLink) ~= "function" then
+        return
+    end
+
+    runtimeServices.customSpellLinkOriginal = ChatEdit_InsertLink
+    ChatEdit_InsertLink = function(link, ...)
+        local customInput = runtimeServices.customSpellInput
+        if customInput and customInput:IsShown() and customInput:HasFocus() and type(link) == "string" then
+            customInput:Insert(link)
+            return true
+        end
+        return runtimeServices.customSpellLinkOriginal(link, ...)
+    end
+    runtimeServices.customSpellLinkHookInstalled = true
+end
+
 local function getSpellName(spellID)
     if C_Spell and C_Spell.GetSpellName then
         return C_Spell.GetSpellName(spellID)
@@ -1867,6 +1889,26 @@ local function resolveCustomSpellInputToSpellID(text)
     local directSpellID = trimmed:match("|Hspell:(%d+)") or trimmed:match("spell:(%d+)") or trimmed:match("^(%d+)$")
     if directSpellID then
         return normalizeSpellID(directSpellID)
+    end
+
+    if C_Spell and C_Spell.GetSpellIDForSpellIdentifier then
+        local ok, resolvedFromIdentifier = pcall(C_Spell.GetSpellIDForSpellIdentifier, trimmed)
+        if ok then
+            local normalizedFromIdentifier = normalizeSpellID(resolvedFromIdentifier)
+            if normalizedFromIdentifier then
+                return normalizedFromIdentifier
+            end
+        end
+    end
+
+    if GetSpellInfo then
+        local ok, _, _, _, _, _, _, resolvedFromName = pcall(GetSpellInfo, trimmed)
+        if ok then
+            local normalizedFromName = normalizeSpellID(resolvedFromName)
+            if normalizedFromName then
+                return normalizedFromName
+            end
+        end
     end
 
     local normalizedName = string.lower(trimmed)
@@ -4476,7 +4518,11 @@ local function createOptionsFrame()
     addSpellButton:SetText("Add")
 
     local customSpellInputLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    customSpellInputLabel:SetText("Add manually by spell ID, shift-clicked spell link, or exact spell name")
+    customSpellInputLabel:SetText("Add manually by spell ID, shift-click spellbook, or exact spell name")
+    customSpellInputLabel:SetJustifyH("LEFT")
+    if customSpellInputLabel.SetWordWrap then
+        customSpellInputLabel:SetWordWrap(true)
+    end
 
     local customSpellInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
     customSpellInput:SetSize(220, 24)
@@ -4486,6 +4532,10 @@ local function createOptionsFrame()
     customSpellInput:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
+
+    local addManualSpellButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    addManualSpellButton:SetSize(64, 24)
+    addManualSpellButton:SetText("Add")
 
     local removeAllSpellsButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     removeAllSpellsButton:SetSize(100, 24)
@@ -4626,6 +4676,7 @@ local function createOptionsFrame()
     local function applyOptionsLayout()
         local width = frame:GetWidth()
         local rightColumnLeft = math.max(330, math.floor(width * 0.56))
+        local rightColumnWidth = math.max(190, width - rightColumnLeft - 44)
 
         customSpellsLabel:ClearAllPoints()
         customSpellsLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", rightColumnLeft, contentTopY)
@@ -4633,18 +4684,22 @@ local function createOptionsFrame()
         customSpellDropdown:ClearAllPoints()
         customSpellDropdown:SetPoint("TOPLEFT", customSpellsLabel, "BOTTOMLEFT", -16, -2)
 
-        local dropdownWidth = math.max(170, width - rightColumnLeft - 50)
+        local dropdownWidth = math.max(110, rightColumnWidth - 74)
         UIDropDownMenu_SetWidth(customSpellDropdown, dropdownWidth)
+
+        addSpellButton:ClearAllPoints()
+        addSpellButton:SetPoint("LEFT", customSpellDropdown, "RIGHT", -4, 2)
 
         customSpellInputLabel:ClearAllPoints()
         customSpellInputLabel:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -8)
+        customSpellInputLabel:SetWidth(rightColumnWidth)
 
         customSpellInput:ClearAllPoints()
         customSpellInput:SetPoint("TOPLEFT", customSpellInputLabel, "BOTTOMLEFT", 0, -6)
-        customSpellInput:SetWidth(math.max(130, width - rightColumnLeft - 126))
+        customSpellInput:SetWidth(math.max(90, rightColumnWidth - 74))
 
-        addSpellButton:ClearAllPoints()
-        addSpellButton:SetPoint("LEFT", customSpellInput, "RIGHT", 8, 0)
+        addManualSpellButton:ClearAllPoints()
+        addManualSpellButton:SetPoint("LEFT", customSpellInput, "RIGHT", 8, 0)
 
         removeAllSpellsButton:ClearAllPoints()
         removeAllSpellsButton:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
@@ -4696,10 +4751,14 @@ local function createOptionsFrame()
         end
     end
 
-    local function handleAddCustomSpell()
+    local function handleAddCustomSpell(preferManualInput)
         local customInput = optionsControls and optionsControls.customSpellInput
         local manualText = trimInputText(customInput and customInput:GetText() or "")
         local usingManualInput = (manualText ~= "")
+        if preferManualInput and not usingManualInput then
+            msg("enter a valid spell ID, shift-clicked spell link, or exact spell name")
+            return
+        end
         local spellID = optionsControls and optionsControls.selectedCustomSpellID or nil
         if usingManualInput then
             spellID = resolveCustomSpellInputToSpellID(manualText)
@@ -4738,11 +4797,16 @@ local function createOptionsFrame()
     end
 
     addSpellButton:SetScript("OnClick", function()
-        handleAddCustomSpell()
+        handleAddCustomSpell(false)
+    end)
+    addManualSpellButton:SetScript("OnClick", function()
+        handleAddCustomSpell(true)
     end)
     customSpellInput:SetScript("OnEnterPressed", function()
-        handleAddCustomSpell()
+        handleAddCustomSpell(true)
     end)
+
+    runtimeServices.installCustomSpellLinkInsertHook(customSpellInput)
 
     removeAllSpellsButton:SetScript("OnClick", function()
         local removed = clearAllTrackedSpells()
@@ -4795,6 +4859,7 @@ local function createOptionsFrame()
         customSpellOptions = {},
         selectedCustomSpellID = nil,
         addSpellButton = addSpellButton,
+        addManualSpellButton = addManualSpellButton,
         removeAllSpellsButton = removeAllSpellsButton,
         customSpellListScroll = customSpellListScroll,
         customSpellListContent = customSpellListContent,
@@ -4810,7 +4875,7 @@ local function createOptionsFrame()
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
-            customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, removeAllSpellsButton,
+            customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton, removeAllSpellsButton,
             customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
         },
         devWidgets = {
