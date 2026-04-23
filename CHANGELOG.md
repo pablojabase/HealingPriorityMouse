@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-23
+
 ### Added
 - Added a new CDM-hybrid cooldown provider layer that builds spell-ID alias maps from Blizzard Cooldown Viewer metadata (`C_CooldownViewer`) while keeping native spell API fallback paths.
 - Added a coalesced refresh queue with timer-based wake scheduling so icon refreshes can be batched and woken near predicted cooldown/charge completion times.

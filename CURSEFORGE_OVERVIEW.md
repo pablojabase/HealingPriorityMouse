@@ -1,55 +1,41 @@
 # HealingPriorityMouse
 
-A lightweight healer companion that puts your next high-priority spells right next to your cursor.
+A fast, lightweight healing companion that keeps your next important spell right where your eyes already are: next to your cursor.
 
-Inspired by **Healing Priority @ Mouse - FredJones** WeakAura, now as a standalone Retail WoW addon.
-
----
-
-## Why You'll Love It
-
-Keeps a clean row of smart healing prompts near your mouse so you can react faster, stay focused, and keep people alive when using click-casting.
+Built for healers who want cleaner decision support without clutter, noise, or bloat.
 
 ---
 
-## Highlights
+## Why Players Like It
 
-- Priority icons that follow your mouse
-- Quick and easy setup with `/hpm options`
-- Resize icons your way
-- Opacity slider for a clean UI look
-- Optional spell names (show/hide)
-- Charge/in-icon counters where relevant
-- Discipline Atonement count support
+- Priority icons follow your mouse so you can react faster in real time.
+- Smooth, reliable charge and cooldown behavior in combat.
+- Easy in-game setup with no Lua editing needed.
+- Optional glow, border, names, and charge counters to match your UI style.
+- Smart tracked-spell list you can customize per character.
 
 ---
 
-## Slash Commands
+## New in 2.1.0
 
-- `/hpm` or `/healingprioritymouse` — show current settings
-- `/hpm options` — open options window
-- `/hpm toggle` — turn display on/off
-
-- `/hpm charges on|off` — show/hide charge text
-- `/hpm undergrowth on|off|auto` — Lifebloom behavior mode
-- `/hpm scale <number>` — icon size (`0.6-3.0`)
-- `/hpm opacity <0-100>` — icon opacity
-- `/hpm names on|off` — show/hide spell names
-- `/hpm namepos top|bottom` — move spell names above/below icons
-
-- `/hpm audit` — run a quick spell check (mainly for troubleshooting after patches; share your spec if reporting issues)
-- `/hpm version` — show addon version (useful for bug reports)
+- Big reliability upgrade for cooldown and charge tracking.
+- Better consistency when spending charges (less flicker, cleaner updates).
+- Improved handling for long cooldowns used in combat.
+- New developer tools panel options for live diagnostics and performance sampling.
+- Better spell-matching coverage for tricky spell variants.
 
 ---
 
-## Notes
+## Quick Start
 
-- Built for modern WoW Retail.
-- If something feels off after a patch, run `/hpm audit` and share your spec when reporting.
+1. Install and log in.
+2. Type `/hpm options`.
+3. Tune the look, scale, opacity, and tracked spells.
+4. Heal as usual and keep your focus on the fight.
 
 ---
 
-## Credits
+## Philosophy
 
-- Original concept inspiration: **Healing Priority @ Mouse - FredJones** WeakAura.
-
+HealingPriorityMouse is display-only guidance.
+It helps you see what matters now, while you stay in full control of every cast.

@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ADDON_VERSION = "2.0.4"
+local ADDON_VERSION = "2.1.0"
 local ns = HealingPriorityMouseNS or {}
 HealingPriorityMouseNS = ns
 
