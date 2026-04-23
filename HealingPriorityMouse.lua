@@ -179,26 +179,64 @@ runtimeServices.getProviderStatusSummary = function(logger)
     return "Provider: " .. mode .. " | rev " .. revision .. " | tracked " .. trackedCount .. " | " .. dirty
 end
 
+runtimeServices.getLinkTextFromInsertArgs = function(...)
+    local argCount = select("#", ...)
+    if argCount <= 0 then
+        return nil
+    end
+
+    for index = 1, argCount do
+        local value = select(index, ...)
+        if type(value) == "string" and value ~= "" then
+            return value
+        end
+    end
+
+    return nil
+end
+
+runtimeServices.tryInsertLinkIntoCustomSpellInput = function(...)
+    local customInput = runtimeServices.customSpellInput
+    if not customInput or not customInput:IsShown() or not customInput:HasFocus() then
+        return false
+    end
+
+    local linkText = runtimeServices.getLinkTextFromInsertArgs(...)
+    if not linkText then
+        return false
+    end
+
+    customInput:Insert(linkText)
+    return true
+end
+
 runtimeServices.installCustomSpellLinkInsertHook = function(editBox)
     runtimeServices.customSpellInput = editBox
     if runtimeServices.customSpellLinkHookInstalled then
         return
     end
 
-    if type(ChatEdit_InsertLink) ~= "function" then
+    local installed = false
+    local hasHookSecureFunc = (type(hooksecurefunc) == "function")
+    if not hasHookSecureFunc then
         return
     end
 
-    runtimeServices.customSpellLinkOriginal = ChatEdit_InsertLink
-    ChatEdit_InsertLink = function(link, ...)
-        local customInput = runtimeServices.customSpellInput
-        if customInput and customInput:IsShown() and customInput:HasFocus() and type(link) == "string" then
-            customInput:Insert(link)
-            return true
-        end
-        return runtimeServices.customSpellLinkOriginal(link, ...)
+    local function onInsertLink(...)
+        runtimeServices.tryInsertLinkIntoCustomSpellInput(...)
     end
-    runtimeServices.customSpellLinkHookInstalled = true
+
+    if ChatFrameUtil and type(ChatFrameUtil.InsertLink) == "function" then
+        hooksecurefunc(ChatFrameUtil, "InsertLink", onInsertLink)
+        installed = true
+    end
+
+    if type(ChatEdit_InsertLink) == "function" then
+        hooksecurefunc("ChatEdit_InsertLink", onInsertLink)
+        installed = true
+    end
+
+    runtimeServices.customSpellLinkHookInstalled = installed
 end
 
 local function getSpellName(spellID)
@@ -4529,8 +4567,36 @@ local function createOptionsFrame()
     customSpellInput:SetAutoFocus(false)
     customSpellInput:SetNumeric(false)
     customSpellInput:SetMaxLetters(160)
+    customSpellInput:SetScript("OnMouseDown", function(self)
+        self:SetFocus()
+        runtimeServices.customSpellInput = self
+    end)
+    customSpellInput:SetScript("OnEditFocusGained", function(self)
+        runtimeServices.customSpellInput = self
+    end)
     customSpellInput:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
+    end)
+    customSpellInput:SetScript("OnReceiveDrag", function(self)
+        local cursorType, spellID = GetCursorInfo()
+        if cursorType ~= "spell" then
+            return
+        end
+
+        local link = nil
+        if C_Spell and C_Spell.GetSpellLink then
+            link = C_Spell.GetSpellLink(spellID)
+        end
+        if (not link or link == "") and GetSpellLink then
+            link = GetSpellLink(spellID)
+        end
+        if type(link) == "string" and link ~= "" then
+            runtimeServices.customSpellInput = self
+            self:Insert(link)
+            if ClearCursor then
+                ClearCursor()
+            end
+        end
     end)
 
     local addManualSpellButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
