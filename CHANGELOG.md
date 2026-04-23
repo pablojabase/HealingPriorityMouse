@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-04-23
+
 ### Changed
 - Refined tracked-spell options layout so manual-add controls and helper text stay within the options window bounds on resize.
 
