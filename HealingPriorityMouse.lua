@@ -4491,8 +4491,25 @@ local function createOptionsFrame()
     removeAllSpellsButton:SetSize(100, 24)
     removeAllSpellsButton:SetText("Remove All")
 
-    local customSpellHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    customSpellHint:SetText("Defaults are pre-populated per healer spec, built-in class spells can be added from the dropdown, and manual entry lets you track missing spells without editing Lua.")
+    local customSpellHintText = "Defaults are pre-populated per healer spec, built-in class spells can be added from the dropdown, and manual entry lets you track missing spells without editing Lua."
+
+    local customSpellHintIcon = CreateFrame("Button", nil, frame)
+    customSpellHintIcon:SetSize(16, 16)
+    customSpellHintIcon:SetNormalTexture("Interface\\COMMON\\help-i")
+    customSpellHintIcon:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    customSpellHintIcon:SetPushedTexture("Interface\\COMMON\\help-i")
+    customSpellHintIcon:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Tracked Spells Info", 1, 0.82, 0)
+        GameTooltip:AddLine(customSpellHintText, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    customSpellHintIcon:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    local customSpellHintLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    customSpellHintLabel:SetText("Tracking info")
 
     local customSpellListScroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     local customSpellListContent = CreateFrame("Frame", nil, customSpellListScroll)
@@ -4616,27 +4633,30 @@ local function createOptionsFrame()
         customSpellDropdown:ClearAllPoints()
         customSpellDropdown:SetPoint("TOPLEFT", customSpellsLabel, "BOTTOMLEFT", -16, -2)
 
-        local dropdownWidth = math.max(170, width - rightColumnLeft - 134)
+        local dropdownWidth = math.max(170, width - rightColumnLeft - 50)
         UIDropDownMenu_SetWidth(customSpellDropdown, dropdownWidth)
-
-        addSpellButton:ClearAllPoints()
-        addSpellButton:SetPoint("LEFT", customSpellDropdown, "RIGHT", -4, 2)
 
         customSpellInputLabel:ClearAllPoints()
         customSpellInputLabel:SetPoint("TOPLEFT", customSpellDropdown, "BOTTOMLEFT", 16, -8)
 
         customSpellInput:ClearAllPoints()
         customSpellInput:SetPoint("TOPLEFT", customSpellInputLabel, "BOTTOMLEFT", 0, -6)
-        customSpellInput:SetWidth(math.max(170, width - rightColumnLeft - 50))
+        customSpellInput:SetWidth(math.max(130, width - rightColumnLeft - 126))
+
+        addSpellButton:ClearAllPoints()
+        addSpellButton:SetPoint("LEFT", customSpellInput, "RIGHT", 8, 0)
 
         removeAllSpellsButton:ClearAllPoints()
         removeAllSpellsButton:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
 
-        customSpellHint:ClearAllPoints()
-        customSpellHint:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 0, -8)
+        customSpellHintIcon:ClearAllPoints()
+        customSpellHintIcon:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 2, -8)
+
+        customSpellHintLabel:ClearAllPoints()
+        customSpellHintLabel:SetPoint("LEFT", customSpellHintIcon, "RIGHT", 6, 0)
 
         customSpellListScroll:ClearAllPoints()
-        customSpellListScroll:SetPoint("TOPLEFT", customSpellHint, "BOTTOMLEFT", 0, -8)
+        customSpellListScroll:SetPoint("TOPLEFT", customSpellHintIcon, "BOTTOMLEFT", -2, -8)
         customSpellListScroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -34, 46)
     end
 
@@ -4791,7 +4811,7 @@ local function createOptionsFrame()
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
             customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, removeAllSpellsButton,
-            customSpellHint, customSpellListScroll,
+            customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
         },
         devWidgets = {
             devtoolsTitle, providerModeLabel, providerModeDropdown, providerSummary,
