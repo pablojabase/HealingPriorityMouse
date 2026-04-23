@@ -15,6 +15,9 @@ All notable changes to this project are documented in this file.
 - Added provider mode controls (`CDM Hybrid` vs `Native`) to Devtools and slash commands (`/hpm provider native|cdm-hybrid`).
 - Moved new migration service state onto a shared runtime table to stay under Lua top-level local limits and avoid `main function has more than 200 local variables` warnings.
 
+### Fixed
+- Hardened cast-time readiness transitions for tracked single-cooldown spells (for example `Lay on Hands`) so combat cast events immediately fail closed instead of briefly reusing stale ready cache state.
+
 ## [2.0.4] - 2026-04-22
 
 ### Fixed

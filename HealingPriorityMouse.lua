@@ -2734,6 +2734,7 @@ end
 
 local LIFE_COCOON_SPELL_ID = 116849
 local LIFE_COCOON_CAST_GUARD_WINDOW = 1.0
+runtimeServices.genericSingleCooldownCastGuardWindow = 1.2
 
 local function isRenewingMistReady(spellID)
     local charges = getSafeCharges(spellID)
@@ -2913,6 +2914,15 @@ local function hasAvailableChargeOrReadyStrict(spellID)
     if chargeAvailable ~= nil then
         return chargeAvailable
     end
+
+    local cached = getCachedGlowState(spellID)
+    if cached and cached.cooldownReady == false and cached.lastSpendTime then
+        local guardWindow = runtimeServices.genericSingleCooldownCastGuardWindow or 1.2
+        if numberLE(getNowTime() - cached.lastSpendTime, guardWindow) then
+            return false
+        end
+    end
+
     local strictReady = getCooldownReadyByTimer(spellID, false)
     if strictReady then
         updateCachedGlowState(spellID, {
@@ -2923,7 +2933,6 @@ local function hasAvailableChargeOrReadyStrict(spellID)
 
     local permissiveReady = getCooldownReadyByTimer(spellID, true)
     if permissiveReady then
-        local cached = getCachedGlowState(spellID)
         if cached and cached.cooldownReady ~= nil then
             return cached.cooldownReady and true or false
         end
@@ -2934,6 +2943,105 @@ local function hasAvailableChargeOrReadyStrict(spellID)
         cooldownReady = false,
     })
     return false
+end
+
+runtimeServices.getSpellBaseCooldownSeconds = function(spellID)
+    if not (spellID and GetSpellBaseCooldown) then
+        return nil
+    end
+
+    local ok, baseCooldownMS = pcall(GetSpellBaseCooldown, spellID)
+    if not ok then
+        return nil
+    end
+
+    local cooldownMS = plainNumber(baseCooldownMS)
+    if cooldownMS and numberGT(cooldownMS, 0) then
+        return cooldownMS / 1000
+    end
+
+    return nil
+end
+
+runtimeServices.applySingleCooldownCastGuard = function(spellID, castState, liveCharges)
+    if not spellID then
+        return
+    end
+
+    local baseCooldownSeconds = runtimeServices.getSpellBaseCooldownSeconds(spellID)
+    local likelySingleCooldown = baseCooldownSeconds and numberGT(baseCooldownSeconds, REAL_COOLDOWN_MIN_SECONDS) or false
+
+    local chargeMax = plainNumber(liveCharges and liveCharges.max)
+    local chargeCurrent = plainNumber(liveCharges and liveCharges.current)
+    local chargeRechargeStart = plainNumber(liveCharges and liveCharges.rechargeStart)
+    local chargeRechargeDuration = plainNumber(liveCharges and liveCharges.rechargeDuration)
+    local chargeModRate = plainNumber(liveCharges and liveCharges.chargeModRate)
+    if not likelySingleCooldown and chargeMax and numberLE(chargeMax, 1)
+        and chargeRechargeDuration and numberGT(chargeRechargeDuration, REAL_COOLDOWN_MIN_SECONDS) then
+        likelySingleCooldown = true
+    end
+
+    local cooldownInfo = castState and castState.cooldownInfo
+    local cooldownStart = plainNumber(cooldownInfo and cooldownInfo.startTime)
+    local cooldownDuration = plainNumber(cooldownInfo and cooldownInfo.duration)
+    local cooldownModRate = plainNumber(cooldownInfo and cooldownInfo.modRate)
+    if not likelySingleCooldown and cooldownDuration and numberGT(cooldownDuration, REAL_COOLDOWN_MIN_SECONDS) then
+        likelySingleCooldown = true
+    end
+
+    if not likelySingleCooldown then
+        return
+    end
+
+    local now = getNowTime()
+    local patch = {
+        cooldownReady = false,
+        lastSpendTime = now,
+        chargeTime = now,
+    }
+
+    if chargeMax and numberLE(chargeMax, 1) then
+        patch.max = chargeMax
+        patch.current = (chargeCurrent and numberGT(chargeCurrent, 0)) and chargeCurrent or 0
+        if chargeRechargeDuration and numberGT(chargeRechargeDuration, 0) then
+            patch.rechargeDuration = chargeRechargeDuration
+        end
+        if chargeRechargeStart and numberGT(chargeRechargeStart, 0) then
+            patch.rechargeStart = chargeRechargeStart
+        elseif patch.rechargeDuration then
+            patch.rechargeStart = now
+        end
+        if chargeModRate and numberGT(chargeModRate, 0) then
+            patch.chargeModRate = chargeModRate
+        end
+    end
+
+    if cooldownDuration and numberGT(cooldownDuration, 0) then
+        patch.rechargeDuration = cooldownDuration
+        if cooldownStart and numberGT(cooldownStart, 0) then
+            patch.rechargeStart = cooldownStart
+        elseif not patch.rechargeStart then
+            patch.rechargeStart = now
+        end
+        if cooldownModRate and numberGT(cooldownModRate, 0) then
+            patch.chargeModRate = cooldownModRate
+        end
+    elseif baseCooldownSeconds and numberGT(baseCooldownSeconds, 0) and not patch.rechargeDuration then
+        patch.rechargeDuration = baseCooldownSeconds
+        patch.rechargeStart = now
+    end
+
+    updateCachedGlowState(spellID, patch)
+
+    local cooldownSourceSpellID = plainNumber(castState and castState.cooldownSourceSpellID)
+    if cooldownSourceSpellID and cooldownSourceSpellID ~= spellID then
+        updateCachedGlowState(cooldownSourceSpellID, patch)
+    end
+
+    local chargesSourceSpellID = plainNumber(castState and castState.chargesSourceSpellID)
+    if chargesSourceSpellID and chargesSourceSpellID ~= spellID and chargesSourceSpellID ~= cooldownSourceSpellID then
+        updateCachedGlowState(chargesSourceSpellID, patch)
+    end
 end
 
 local function formatDiagnosticValue(value)
@@ -4944,6 +5052,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
             if cachedCharges and cachedCharges.current and cachedCharges.max and numberGT(cachedCharges.max, 1) then
                 applyChargeSpendToCache(castSpellID, cachedCharges)
+            end
+
+            if isSpellInTrackedList(castSpellID) then
+                runtimeServices.applySingleCooldownCastGuard(castSpellID, castState, liveCharges)
             end
 
             if isLifeCocoonSpell(castSpellID) then
