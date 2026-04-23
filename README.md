@@ -11,6 +11,7 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - Lets you add your own additional tracked spells from an in-game class spell dropdown or by manual spell ID / shift-clicked spell link / exact spell name.
 - Adds optional borders for the main cursor-following spell icons.
 - Keeps custom tracked spell lists character-specific to avoid cross-character bleed.
+- Uses a CDM-hybrid cooldown provider (default) that supplements spell-ID resolution with Blizzard Cooldown Viewer relationships, with a legacy native mode fallback.
 - Uses modern Retail APIs (`C_UnitAuras`, `C_Spell`) and is updated for Retail `12.0.5` (`Interface: 120005`).
 - Does not perform protected actions (no auto-cast, no targeting automation).
 
@@ -28,6 +29,8 @@ Display-only addon version of the `Healing Priority @ Mouse - FredJones` WeakAur
 - `/hpm borders on|off`: toggle icon borders
 - `/hpm glow on|off`: toggle conditional icon glow highlights
 - `/hpm glowdebug on|off`: toggle glow condition debug messages
+- `/hpm provider native|cdm-hybrid`: switch cooldown provider mode (`cdm-hybrid` recommended)
+- `/hpm perf on|off|sample`: toggle/addon CPU-memory sampling and print a snapshot
 - `/hpm audit`: verify which tracked spell IDs resolve on your current client build
 - `/hpm apidump <spellID> [moreSpellIDs]`: print cooldown/charges/duration-object diagnostics for one or more spells
 

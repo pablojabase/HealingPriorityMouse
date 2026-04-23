@@ -1,5 +1,7 @@
 local ADDON_NAME = ...
 local ADDON_VERSION = "2.0.4"
+local ns = HealingPriorityMouseNS or {}
+HealingPriorityMouseNS = ns
 
 HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
@@ -14,6 +16,8 @@ local defaults = {
     showGlows = true,
     glowDebug = false,
     devLiveLogging = false,
+    devPerfMonitorEnabled = false,
+    cooldownProviderMode = "cdm-hybrid",
     customTrackedSpells = {},
     customTrackedSpellsByCharacter = {},
     customTrackedSpecsInitializedByCharacter = {},
@@ -27,6 +31,8 @@ local debugLogScroll
 local debugLogEditBox
 local lastLiveLogSignature
 local minimapButton
+local runtimeServices = ns.runtimeServices or {}
+ns.runtimeServices = runtimeServices
 local MINIMAP_ICON_SPELL_ID = 2061
 local CUSTOM_MINIMAP_ICON_TEXTURE = "Interface\\AddOns\\HealingPriorityMouse\\Media\\MinimapIcon"
 local MINIMAP_BUTTON_RADIUS = 5
@@ -94,6 +100,83 @@ end
 local function msg(text)
     appendDevLogLine("MSG: " .. tostring(text))
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ccffHealingPriorityMouse|r: " .. tostring(text))
+end
+
+runtimeServices.getConfiguredProviderMode = function()
+    local mode = HealingPriorityMouseDB and HealingPriorityMouseDB.cooldownProviderMode or nil
+    if mode == "native" or mode == "cdm-hybrid" then
+        return mode
+    end
+    return "cdm-hybrid"
+end
+
+runtimeServices.ensureCooldownProvider = function(logger)
+    local provider = runtimeServices.cooldownProvider
+    if provider then
+        local mode = runtimeServices.getConfiguredProviderMode()
+        if provider.SetMode then
+            provider:SetMode(mode)
+        end
+        return provider
+    end
+
+    if ns and ns.CooldownProviderFactory and type(ns.CooldownProviderFactory.Create) == "function" then
+        provider = ns.CooldownProviderFactory.Create({
+            mode = runtimeServices.getConfiguredProviderMode(),
+            logger = logger,
+        })
+        if provider and provider.Initialize then
+            provider:Initialize()
+        end
+        runtimeServices.cooldownProvider = provider
+    end
+
+    return runtimeServices.cooldownProvider
+end
+
+runtimeServices.ensurePerformanceMonitor = function()
+    local monitor = runtimeServices.performanceMonitor
+    if monitor then
+        return monitor
+    end
+
+    if ns and ns.PerformanceMonitorFactory and type(ns.PerformanceMonitorFactory.Create) == "function" then
+        monitor = ns.PerformanceMonitorFactory.Create({
+            addonName = ADDON_NAME,
+            interval = 1.0,
+            onSample = function(metrics)
+                runtimeServices.lastPerformanceSnapshot = metrics
+            end,
+        })
+        runtimeServices.performanceMonitor = monitor
+    end
+
+    return runtimeServices.performanceMonitor
+end
+
+runtimeServices.getPerformanceSummaryLine = function()
+    if ns and type(ns.PerformanceMonitorFormatLine) == "function" then
+        return ns.PerformanceMonitorFormatLine(runtimeServices.lastPerformanceSnapshot)
+    end
+    return "CPU: n/a | Memory: n/a"
+end
+
+runtimeServices.getProviderStatusSummary = function(logger)
+    local provider = runtimeServices.ensureCooldownProvider(logger)
+    if not provider or not provider.GetStatus then
+        return "Provider: unavailable"
+    end
+
+    local status = provider:GetStatus()
+    if type(status) ~= "table" then
+        return "Provider: unavailable"
+    end
+
+    local mode = status.mode or "unknown"
+    local revision = tostring(status.revision or 0)
+    local trackedCount = tostring(status.trackedSpellCount or 0)
+    local dirty = status.dirty and "dirty" or "clean"
+    return "Provider: " .. mode .. " | rev " .. revision .. " | tracked " .. trackedCount .. " | " .. dirty
 end
 
 local function getSpellName(spellID)
@@ -981,17 +1064,40 @@ local function getSpellCandidateIDs(spellID)
     if not normalizedSpellID then
         return {}
     end
-    local candidates = {}
-    local seen = {}
-    addRelatedSpellCandidates(candidates, seen, normalizedSpellID)
+
+    local baseCandidates = {}
+    local baseSeen = {}
+    addRelatedSpellCandidates(baseCandidates, baseSeen, normalizedSpellID)
 
     local index = 1
-    while index <= #candidates and index <= 12 do
-        addRelatedSpellCandidates(candidates, seen, candidates[index])
+    while index <= #baseCandidates and index <= 12 do
+        addRelatedSpellCandidates(baseCandidates, baseSeen, baseCandidates[index])
         index = index + 1
     end
 
-    return candidates
+    local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+    if not (provider and provider.GetCandidateSpellIDs) then
+        return baseCandidates
+    end
+
+    local providerCandidates = provider:GetCandidateSpellIDs(normalizedSpellID, baseCandidates)
+    if type(providerCandidates) ~= "table" or #providerCandidates == 0 then
+        return baseCandidates
+    end
+
+    local mergedCandidates = {}
+    local mergedSeen = {}
+    for candidateIndex = 1, #providerCandidates do
+        addSpellCandidate(mergedCandidates, mergedSeen, providerCandidates[candidateIndex])
+    end
+
+    local expandIndex = 1
+    while expandIndex <= #mergedCandidates and expandIndex <= 24 do
+        addRelatedSpellCandidates(mergedCandidates, mergedSeen, mergedCandidates[expandIndex])
+        expandIndex = expandIndex + 1
+    end
+
+    return mergedCandidates
 end
 
 local function normalizeCooldownInfo(rawValue, rawDuration, rawEnabled, rawModRate)
@@ -2908,6 +3014,37 @@ local function dumpSpellAPIDiagnostics(spellID)
     appendDiagnosticField(runtimeFields, "isMultiCharge", runtimeState and runtimeState.isMultiCharge)
     emitDiagnosticLine("apidump runtime", runtimeFields)
 
+    local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+    local providerStatus = provider and provider.GetStatus and provider:GetStatus() or nil
+    local providerFields = {}
+    appendDiagnosticField(providerFields, "mode", providerStatus and providerStatus.mode)
+    appendDiagnosticField(providerFields, "revision", providerStatus and providerStatus.revision)
+    appendDiagnosticField(providerFields, "dirty", providerStatus and providerStatus.dirty)
+    appendDiagnosticField(providerFields, "trackedSpellCount", providerStatus and providerStatus.trackedSpellCount)
+    appendDiagnosticField(providerFields, "cooldownCount", providerStatus and providerStatus.cooldownCount)
+    appendDiagnosticField(providerFields, "aliasLinks", providerStatus and providerStatus.aliasLinks)
+    emitDiagnosticLine("apidump provider", providerFields)
+
+    local queue = runtimeServices.refreshQueue
+    if queue and queue.GetState then
+        local queueState = queue:GetState()
+        local queueFields = {}
+        appendDiagnosticField(queueFields, "queued", queueState and queueState.queued)
+        appendDiagnosticField(queueFields, "running", queueState and queueState.running)
+        appendDiagnosticField(queueFields, "rerun", queueState and queueState.rerun)
+        appendDiagnosticField(queueFields, "wakeAt", queueState and queueState.wakeAt)
+        appendDiagnosticField(queueFields, "lastDispatch", queueState and queueState.lastDispatch)
+        emitDiagnosticLine("apidump queue", queueFields)
+    end
+
+    local perfFields = {}
+    local snapshot = runtimeServices.lastPerformanceSnapshot
+    appendDiagnosticField(perfFields, "sampleTime", snapshot and snapshot.time)
+    appendDiagnosticField(perfFields, "memoryKB", snapshot and snapshot.memoryKB)
+    appendDiagnosticField(perfFields, "cpuMs", snapshot and snapshot.cpuMs)
+    appendDiagnosticField(perfFields, "scriptProfileEnabled", snapshot and snapshot.scriptProfileEnabled)
+    emitDiagnosticLine("apidump perf", perfFields)
+
     local cooldownInfo
     if C_Spell and C_Spell.GetSpellCooldown then
         local ok, result = pcall(C_Spell.GetSpellCooldown, spellID)
@@ -3573,9 +3710,81 @@ local function refresh()
             lastLiveLogSignature = signature
         end
     end
+
+    local queue = runtimeServices.refreshQueue
+    if queue and queue.RequestAt then
+        local now = getNowTime()
+        local nextWakeAt = nil
+        for index = 1, #entries do
+            local runtimeState = getSpellRuntimeState(entries[index].spellID)
+            if runtimeState then
+                local cooldownEndTime = plainNumber(runtimeState.cooldownEndTime)
+                if cooldownEndTime and numberGT(cooldownEndTime, now + 0.01) then
+                    if not nextWakeAt or cooldownEndTime < nextWakeAt then
+                        nextWakeAt = cooldownEndTime
+                    end
+                end
+
+                local chargesInfo = runtimeState.chargesInfo
+                if chargesInfo and not chargesInfo.unknown then
+                    local current = plainNumber(chargesInfo.current)
+                    local max = plainNumber(chargesInfo.max)
+                    local rechargeStart = plainNumber(chargesInfo.rechargeStart)
+                    local rechargeDuration = plainNumber(chargesInfo.rechargeDuration)
+                    local chargeModRate = plainNumber(chargesInfo.chargeModRate)
+
+                    if current and max and rechargeDuration and current < max and numberGT(rechargeDuration, 0) then
+                        if not (chargeModRate and numberGT(chargeModRate, 0)) then
+                            chargeModRate = 1
+                        end
+                        if not (rechargeStart and numberGT(rechargeStart, 0)) then
+                            rechargeStart = now
+                        end
+                        local chargeReadyAt = rechargeStart + (rechargeDuration / chargeModRate)
+                        if numberGT(chargeReadyAt, now + 0.01) then
+                            if not nextWakeAt or chargeReadyAt < nextWakeAt then
+                                nextWakeAt = chargeReadyAt
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if nextWakeAt then
+            queue:RequestAt(nextWakeAt + 0.03, { reason = "predicted-ready" })
+        elseif queue.CancelWake then
+            queue:CancelWake()
+        end
+    end
 end
 
 local refreshOptionsControls
+
+runtimeServices.ensureRefreshQueue = function()
+    local queue = runtimeServices.refreshQueue
+    if queue then
+        return queue
+    end
+    if ns and ns.RefreshQueueFactory and type(ns.RefreshQueueFactory.Create) == "function" then
+        queue = ns.RefreshQueueFactory.Create({
+            onDispatch = function()
+                refresh()
+            end,
+        })
+        runtimeServices.refreshQueue = queue
+    end
+    return runtimeServices.refreshQueue
+end
+
+runtimeServices.queueRefresh = function(options)
+    local queue = runtimeServices.ensureRefreshQueue()
+    if queue and queue.Request then
+        queue:Request(options or {})
+        return
+    end
+    refresh()
+end
 
 local function safeRefreshOptionsControls()
     if refreshOptionsControls then
@@ -3654,6 +3863,24 @@ refreshOptionsControls = function()
 
     if optionsControls.liveLoggingToggle then
         optionsControls.liveLoggingToggle:SetChecked(db.devLiveLogging and true or false)
+    end
+    if optionsControls.perfToggle then
+        optionsControls.perfToggle:SetChecked(db.devPerfMonitorEnabled and true or false)
+    end
+    if optionsControls.perfSummary then
+        optionsControls.perfSummary:SetText(runtimeServices.getPerformanceSummaryLine())
+    end
+    if optionsControls.providerSummary then
+        optionsControls.providerSummary:SetText(runtimeServices.getProviderStatusSummary(appendDevLogLine))
+    end
+    if optionsControls.providerModeDropdown then
+        local mode = runtimeServices.getConfiguredProviderMode()
+        UIDropDownMenu_SetSelectedValue(optionsControls.providerModeDropdown, mode)
+        if mode == "native" then
+            UIDropDownMenu_SetText(optionsControls.providerModeDropdown, "Native (Legacy)")
+        else
+            UIDropDownMenu_SetText(optionsControls.providerModeDropdown, "CDM Hybrid (Recommended)")
+        end
     end
 
     if optionsControls.customSpellDropdown then
@@ -4124,8 +4351,48 @@ local function createOptionsFrame()
     devtoolsTitle:SetPoint("TOPLEFT", 16, contentTopY)
     devtoolsTitle:SetText("Developer tools")
 
+    local providerModeLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    providerModeLabel:SetPoint("TOPLEFT", devtoolsTitle, "BOTTOMLEFT", 0, -8)
+    providerModeLabel:SetText("Cooldown provider mode")
+
+    local providerModeDropdown = CreateFrame("Frame", "HealingPriorityMouseProviderModeDropdown", frame, "UIDropDownMenuTemplate")
+    providerModeDropdown:SetPoint("TOPLEFT", providerModeLabel, "BOTTOMLEFT", -16, -2)
+    UIDropDownMenu_SetWidth(providerModeDropdown, 170)
+    UIDropDownMenu_Initialize(providerModeDropdown, function(self, level)
+        local function addModeOption(label, value)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.value = value
+            info.checked = (runtimeServices.getConfiguredProviderMode() == value)
+            info.func = function()
+                HealingPriorityMouseDB.cooldownProviderMode = value
+                UIDropDownMenu_SetSelectedValue(self, value)
+                local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+                if provider and provider.SetMode then
+                    provider:SetMode(value)
+                    if provider.Invalidate then
+                        provider:Invalidate()
+                    end
+                end
+                invalidateSpellRuntimeCache()
+                runtimeServices.queueRefresh({ reason = "provider-mode-change" })
+                refreshOptionsControls()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        addModeOption("CDM Hybrid (Recommended)", "cdm-hybrid")
+        addModeOption("Native (Legacy)", "native")
+    end)
+
+    local providerSummary = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    providerSummary:SetPoint("TOPLEFT", providerModeDropdown, "BOTTOMLEFT", 16, -4)
+    providerSummary:SetJustifyH("LEFT")
+    providerSummary:SetWidth(300)
+    providerSummary:SetText("Provider: loading...")
+
     local liveLoggingToggle = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
-    liveLoggingToggle:SetPoint("TOPLEFT", devtoolsTitle, "BOTTOMLEFT", 0, -10)
+    liveLoggingToggle:SetPoint("TOPLEFT", providerSummary, "BOTTOMLEFT", -2, -8)
     liveLoggingToggle.Text:SetText("Enable live logging")
     liveLoggingToggle:SetScript("OnClick", function(self)
         HealingPriorityMouseDB.devLiveLogging = self:GetChecked() and true or false
@@ -4133,9 +4400,42 @@ local function createOptionsFrame()
         appendDevLogLine("LIVE logging " .. (HealingPriorityMouseDB.devLiveLogging and "enabled" or "disabled"))
     end)
 
+    local perfToggle = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    perfToggle:SetPoint("TOPLEFT", liveLoggingToggle, "BOTTOMLEFT", 0, -4)
+    perfToggle.Text:SetText("Enable CPU/Memory sampling")
+    perfToggle:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.devPerfMonitorEnabled = self:GetChecked() and true or false
+        local monitor = runtimeServices.ensurePerformanceMonitor()
+        if monitor and monitor.SetEnabled then
+            monitor:SetEnabled(HealingPriorityMouseDB.devPerfMonitorEnabled)
+        end
+        if monitor and monitor.SampleNow then
+            runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+        end
+        refreshOptionsControls()
+    end)
+
+    local samplePerfBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    samplePerfBtn:SetSize(180, 24)
+    samplePerfBtn:SetPoint("TOPLEFT", perfToggle, "BOTTOMLEFT", 4, -10)
+    samplePerfBtn:SetText("Sample performance now")
+    samplePerfBtn:SetScript("OnClick", function()
+        local monitor = runtimeServices.ensurePerformanceMonitor()
+        if monitor and monitor.SampleNow then
+            runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+            refreshOptionsControls()
+        end
+    end)
+
+    local perfSummary = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    perfSummary:SetPoint("TOPLEFT", samplePerfBtn, "BOTTOMLEFT", 0, -8)
+    perfSummary:SetJustifyH("LEFT")
+    perfSummary:SetWidth(300)
+    perfSummary:SetText("CPU: n/a | Memory: n/a")
+
     local openLogsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     openLogsBtn:SetSize(180, 24)
-    openLogsBtn:SetPoint("TOPLEFT", liveLoggingToggle, "BOTTOMLEFT", 4, -12)
+    openLogsBtn:SetPoint("TOPLEFT", perfSummary, "BOTTOMLEFT", 0, -10)
     openLogsBtn:SetText("Open log display")
     openLogsBtn:SetScript("OnClick", function()
         local logFrame = createDebugLogWindow()
@@ -4323,6 +4623,10 @@ local function createOptionsFrame()
         customSpellRows = customSpellRows,
         customSpellEmpty = customSpellEmpty,
         liveLoggingToggle = liveLoggingToggle,
+        providerModeDropdown = providerModeDropdown,
+        perfToggle = perfToggle,
+        perfSummary = perfSummary,
+        providerSummary = providerSummary,
         generalWidgets = {
             enabled, charges, borders, glows, showNames,
             namePositionLabel, namePosition,
@@ -4332,7 +4636,8 @@ local function createOptionsFrame()
             customSpellHint, customSpellListScroll,
         },
         devWidgets = {
-            devtoolsTitle, liveLoggingToggle, openLogsBtn, devtoolsHint,
+            devtoolsTitle, providerModeLabel, providerModeDropdown, providerSummary,
+            liveLoggingToggle, perfToggle, samplePerfBtn, perfSummary, openLogsBtn, devtoolsHint,
         },
     }
 
@@ -4345,6 +4650,17 @@ local function createOptionsFrame()
 
     frame:SetScript("OnShow", function()
         applyOptionsLayout()
+        local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+        if provider and provider.Rebuild then
+            provider:Rebuild(false)
+        end
+        local monitor = runtimeServices.ensurePerformanceMonitor()
+        if monitor and monitor.SetEnabled then
+            monitor:SetEnabled(HealingPriorityMouseDB.devPerfMonitorEnabled and true or false)
+        end
+        if monitor and monitor.SampleNow then
+            runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+        end
         refreshOptionsControls()
         setOptionsTab(frame.activeTab or "general")
     end)
@@ -4546,6 +4862,9 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
+eventFrame:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
+eventFrame:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
 
 eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -4553,6 +4872,15 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             return
         end
         copyDefaults(HealingPriorityMouseDB, defaults)
+        runtimeServices.ensureCooldownProvider(appendDevLogLine)
+        runtimeServices.ensureRefreshQueue()
+        local monitor = runtimeServices.ensurePerformanceMonitor()
+        if monitor and monitor.SetEnabled then
+            monitor:SetEnabled(HealingPriorityMouseDB.devPerfMonitorEnabled and true or false)
+        end
+        if monitor and monitor.SampleNow then
+            runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+        end
         invalidateSpellRuntimeCache()
         sanitizeCustomTrackedSpellsInDB()
         ensureDefaultTrackedSpellsForActiveSpec()
@@ -4560,6 +4888,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         msg("loaded v" .. ADDON_VERSION)
         refresh()
         return
+    end
+
+    local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+    if provider and provider.HandleEvent then
+        provider:HandleEvent(event)
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
@@ -4652,7 +4985,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         createMinimapButton()
     end
 
-    refresh()
+    runtimeServices.queueRefresh({ reason = "event:" .. tostring(event) })
 end)
 
 SLASH_HEALINGPRIORITYMOUSE1 = "/hpm"
@@ -4810,6 +5143,71 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
+    if cmd == "provider" then
+        if rest == "native" or rest == "cdm-hybrid" or rest == "hybrid" then
+            local targetMode = (rest == "native") and "native" or "cdm-hybrid"
+            HealingPriorityMouseDB.cooldownProviderMode = targetMode
+            local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
+            if provider and provider.SetMode then
+                provider:SetMode(targetMode)
+                if provider.Invalidate then
+                    provider:Invalidate()
+                end
+            end
+            invalidateSpellRuntimeCache()
+            runtimeServices.queueRefresh({ reason = "slash-provider-change" })
+            refreshOptionsControls()
+            msg("provider mode = " .. targetMode)
+            return
+        end
+
+        msg(runtimeServices.getProviderStatusSummary(appendDevLogLine))
+        msg("usage: /hpm provider native|cdm-hybrid")
+        return
+    end
+
+    if cmd == "perf" then
+        local monitor = runtimeServices.ensurePerformanceMonitor()
+        if not monitor then
+            msg("performance monitor unavailable")
+            return
+        end
+
+        if rest == "on" then
+            HealingPriorityMouseDB.devPerfMonitorEnabled = true
+            if monitor.SetEnabled then
+                monitor:SetEnabled(true)
+            end
+            if monitor.SampleNow then
+                runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+            end
+            refreshOptionsControls()
+            msg("performance sampling enabled")
+            return
+        end
+
+        if rest == "off" then
+            HealingPriorityMouseDB.devPerfMonitorEnabled = false
+            if monitor.SetEnabled then
+                monitor:SetEnabled(false)
+            end
+            refreshOptionsControls()
+            msg("performance sampling disabled")
+            return
+        end
+
+        if rest == "sample" or rest == "status" or rest == "" then
+            if monitor.SampleNow then
+                runtimeServices.lastPerformanceSnapshot = monitor:SampleNow()
+            end
+            msg(runtimeServices.getPerformanceSummaryLine())
+            return
+        end
+
+        msg("usage: /hpm perf on|off|sample")
+        return
+    end
+
     if cmd == "audit" then
         resolvedSpells = {}
         msg("spell audit for current client:")
@@ -4861,6 +5259,8 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         .. ", showBorders=" .. tostring(HealingPriorityMouseDB.showBorders)
         .. ", showGlows=" .. tostring(HealingPriorityMouseDB.showGlows)
         .. ", glowDebug=" .. tostring(HealingPriorityMouseDB.glowDebug)
+        .. ", perfSampling=" .. tostring(HealingPriorityMouseDB.devPerfMonitorEnabled)
+        .. ", providerMode=" .. tostring(runtimeServices.getConfiguredProviderMode())
         .. ", showSpellNames=" .. tostring(HealingPriorityMouseDB.showSpellNames)
         .. ", spellNamePosition=" .. tostring(HealingPriorityMouseDB.spellNamePosition))
 end

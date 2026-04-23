@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added a new CDM-hybrid cooldown provider layer that builds spell-ID alias maps from Blizzard Cooldown Viewer metadata (`C_CooldownViewer`) while keeping native spell API fallback paths.
+- Added a coalesced refresh queue with timer-based wake scheduling so icon refreshes can be batched and woken near predicted cooldown/charge completion times.
+- Added optional developer CPU/memory sampling controls in Devtools and slash commands (`/hpm perf on|off|sample`) backed by safe addon metrics snapshots.
+- Added provider diagnostics and runtime service diagnostics to `/hpm apidump`, including provider status, queue state, and latest perf sample fields.
+
+### Changed
+- Extended runtime candidate spell resolution to merge native override/base discovery with provider-sourced alias relationships for more stable cooldown-source matching.
+- Added provider mode controls (`CDM Hybrid` vs `Native`) to Devtools and slash commands (`/hpm provider native|cdm-hybrid`).
+- Moved new migration service state onto a shared runtime table to stay under Lua top-level local limits and avoid `main function has more than 200 local variables` warnings.
+
 ## [2.0.4] - 2026-04-22
 
 ### Fixed

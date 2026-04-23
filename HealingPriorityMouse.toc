@@ -5,4 +5,8 @@
 ## Version: @project-version@
 ## SavedVariables: HealingPriorityMouseDB
 
+HPM_Core.lua
+HPM_CooldownProvider.lua
+HPM_RefreshQueue.lua
+HPM_PerformanceMonitor.lua
 HealingPriorityMouse.lua
