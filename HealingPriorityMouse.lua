@@ -5007,20 +5007,24 @@ local function applyConfiguredMinimapTexture(textureObject)
     textureObject:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
 end
 
-local function updateMinimapButtonPosition()
+local function updateMinimapButtonPosition(position)
     if not (minimapButton and Minimap) then
         return
     end
 
-    local angle = tonumber(HealingPriorityMouseDB and HealingPriorityMouseDB.minimapButtonAngle) or 225
+    local angle = tonumber(position)
+    if not angle then
+        angle = tonumber(HealingPriorityMouseDB and HealingPriorityMouseDB.minimapButtonAngle) or 225
+    end
+
     local radians = math.rad(angle)
-    local offsetX = math.cos(radians)
-    local offsetY = math.sin(radians)
+    local x = math.cos(radians)
+    local y = math.sin(radians)
     local quadrant = 1
-    if offsetX < 0 then
+    if x < 0 then
         quadrant = quadrant + 1
     end
-    if offsetY > 0 then
+    if y > 0 then
         quadrant = quadrant + 2
     end
 
@@ -5030,34 +5034,36 @@ local function updateMinimapButtonPosition()
     local height = (Minimap:GetHeight() / 2) + MINIMAP_BUTTON_RADIUS
 
     if quadTable[quadrant] then
-        offsetX = offsetX * width
-        offsetY = offsetY * height
+        x = x * width
+        y = y * height
     else
         local diagonalWidth = math.sqrt(2 * (width ^ 2)) - 10
         local diagonalHeight = math.sqrt(2 * (height ^ 2)) - 10
-        offsetX = math.max(-width, math.min(offsetX * diagonalWidth, width))
-        offsetY = math.max(-height, math.min(offsetY * diagonalHeight, height))
+        x = math.max(-width, math.min(x * diagonalWidth, width))
+        y = math.max(-height, math.min(y * diagonalHeight, height))
     end
 
-    minimapButton:ClearAllPoints()
-    minimapButton:SetPoint("CENTER", Minimap, "CENTER", offsetX, offsetY)
+    minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
 
-local function getMinimapCursorAngle()
-    if not (Minimap and GetCursorPosition and UIParent and UIParent.GetEffectiveScale) then
-        return nil
+local function updateMinimapButtonIconCoords(button, isMouseDown)
+    if not (button and button.icon) then
+        return
     end
 
-    local minimapCenterX, minimapCenterY = Minimap:GetCenter()
-    if not (minimapCenterX and minimapCenterY) then
-        return nil
+    local minX, maxX, minY, maxY = 0.08, 0.92, 0.08, 0.92
+    if not isMouseDown then
+        local deltaX = (maxX - minX) * 0.05
+        local deltaY = (maxY - minY) * 0.05
+        minX = minX + deltaX
+        maxX = maxX - deltaX
+        minY = minY + deltaY
+        maxY = maxY - deltaY
     end
+    button.icon:SetTexCoord(minX, maxX, minY, maxY)
+end
 
-    local scale = Minimap:GetEffectiveScale() or 1
-    local cursorX, cursorY = GetCursorPosition()
-    cursorX = cursorX / scale
-    cursorY = cursorY / scale
-
+local function getMinimapDragAngle(cursorX, cursorY, minimapCenterX, minimapCenterY)
     local deltaX = cursorX - minimapCenterX
     local deltaY = cursorY - minimapCenterY
     if deltaX == 0 and deltaY == 0 then
@@ -5068,39 +5074,65 @@ local function getMinimapCursorAngle()
     if math.atan2 then
         angle = math.deg(math.atan2(deltaY, deltaX))
     else
-        angle = math.deg(math.atan(deltaY / (deltaX == 0 and 0.0001 or deltaX)))
-        if deltaX < 0 then
-            angle = angle + 180
-        elseif deltaY < 0 then
-            angle = angle + 360
+        local ok, result = pcall(math.atan, deltaY, deltaX)
+        if ok and type(result) == "number" then
+            angle = math.deg(result)
+        else
+            angle = math.deg(math.atan(deltaY / (deltaX == 0 and 0.0001 or deltaX)))
+            if deltaX < 0 then
+                angle = angle + 180
+            elseif deltaY < 0 then
+                angle = angle + 360
+            end
         end
     end
 
-    if angle < 0 then
-        angle = angle + 360
-    end
-    return angle
+    return angle % 360
 end
 
-local function updateMinimapButtonDrag()
-    local angle = getMinimapCursorAngle()
-    if not angle then
+local function updateMinimapButtonDrag(self)
+    if not (self and Minimap and GetCursorPosition) then
         return
     end
 
+    local minimapCenterX, minimapCenterY = Minimap:GetCenter()
+    if not (minimapCenterX and minimapCenterY) then
+        return
+    end
+
+    local scale = Minimap:GetEffectiveScale() or 1
+    local cursorX, cursorY = GetCursorPosition()
+    cursorX = cursorX / scale
+    cursorY = cursorY / scale
+
+    local angle = getMinimapDragAngle(cursorX, cursorY, minimapCenterX, minimapCenterY)
+    if not angle then
+        return
+    end
     HealingPriorityMouseDB.minimapButtonAngle = angle
-    updateMinimapButtonPosition()
+    updateMinimapButtonPosition(angle)
 end
 
 local function createMinimapButton()
-    if minimapButton or not Minimap then
+    if not Minimap then
+        return minimapButton
+    end
+
+    if minimapButton then
+        updateMinimapButtonPosition()
         return minimapButton
     end
 
     local button = CreateFrame("Button", "HealingPriorityMouseMinimapButton", Minimap)
     button:SetSize(31, 31)
     button:SetFrameStrata("MEDIUM")
-    button:SetClampedToScreen(true)
+    button:SetFrameLevel(8)
+    if button.SetFixedFrameStrata then
+        button:SetFixedFrameStrata(true)
+    end
+    if button.SetFixedFrameLevel then
+        button:SetFixedFrameLevel(true)
+    end
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:RegisterForDrag("LeftButton")
 
@@ -5114,8 +5146,8 @@ local function createMinimapButton()
     icon:SetSize(20, 20)
     icon:SetPoint("CENTER")
     applyConfiguredMinimapTexture(icon)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     button.icon = icon
+    updateMinimapButtonIconCoords(button, false)
 
     local border = button:CreateTexture(nil, "OVERLAY")
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
@@ -5136,11 +5168,24 @@ local function createMinimapButton()
         end
     end)
     button:SetScript("OnDragStart", function(self)
+        self:LockHighlight()
+        self.isMouseDown = true
+        updateMinimapButtonIconCoords(self, true)
         self:SetScript("OnUpdate", updateMinimapButtonDrag)
     end)
     button:SetScript("OnDragStop", function(self)
         self:SetScript("OnUpdate", nil)
-        updateMinimapButtonDrag()
+        self.isMouseDown = false
+        updateMinimapButtonIconCoords(self, false)
+        self:UnlockHighlight()
+    end)
+    button:SetScript("OnMouseDown", function(self)
+        self.isMouseDown = true
+        updateMinimapButtonIconCoords(self, true)
+    end)
+    button:SetScript("OnMouseUp", function(self)
+        self.isMouseDown = false
+        updateMinimapButtonIconCoords(self, false)
     end)
 
     button:SetScript("OnEnter", function(self)

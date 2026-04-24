@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Reworked minimap-button dragging/positioning to follow the LibDBIcon-style behavior used by addons like VuhDo and KeystonePolaris (more consistent hover-ring movement around minimap shapes).
+
 ## [2.1.1] - 2026-04-23
 
 ### Changed
