@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Coalesced back-to-back `SPELL_UPDATE_COOLDOWN` and `SPELL_UPDATE_CHARGES` events into a single queued refresh pass to reduce redundant recomputation during high event churn.
+- Coalesced Cooldown Viewer metadata update events (`COOLDOWN_VIEWER_*`) behind a versioned deferred refresh so stale callbacks cannot trigger duplicate refresh work.
+
 ### Fixed
 - Reworked minimap-button dragging/positioning to follow the LibDBIcon-style behavior used by addons like VuhDo and KeystonePolaris (more consistent hover-ring movement around minimap shapes).
 

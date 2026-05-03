@@ -4024,6 +4024,74 @@ runtimeServices.queueRefresh = function(options)
     refresh()
 end
 
+runtimeServices.queueCoalescedCooldownRefresh = function(kind)
+    local state = runtimeServices.coalescedCooldownEvents
+    if type(state) ~= "table" then
+        state = {
+            scheduled = false,
+            cooldown = false,
+            charges = false,
+        }
+        runtimeServices.coalescedCooldownEvents = state
+    end
+
+    if kind == "cooldown" then
+        state.cooldown = true
+    elseif kind == "charges" then
+        state.charges = true
+    end
+
+    if state.scheduled then
+        return
+    end
+
+    state.scheduled = true
+    local function dispatch()
+        state.scheduled = false
+
+        local hadCooldown = state.cooldown and true or false
+        local hadCharges = state.charges and true or false
+        state.cooldown = false
+        state.charges = false
+
+        invalidateSpellRuntimeCache()
+
+        local reason = "event:SPELL_UPDATE_COOLDOWN"
+        if hadCharges and not hadCooldown then
+            reason = "event:SPELL_UPDATE_CHARGES"
+        elseif hadCooldown and hadCharges then
+            reason = "event:SPELL_UPDATE_COOLDOWN+CHARGES"
+        end
+
+        runtimeServices.queueRefresh({ reason = reason })
+    end
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, dispatch)
+    else
+        dispatch()
+    end
+end
+
+runtimeServices.queueCooldownViewerRefresh = function(sourceEvent)
+    runtimeServices.cooldownViewerRefreshVersion = (runtimeServices.cooldownViewerRefreshVersion or 0) + 1
+    local version = runtimeServices.cooldownViewerRefreshVersion
+
+    local function dispatch()
+        if runtimeServices.cooldownViewerRefreshVersion ~= version then
+            return
+        end
+        invalidateSpellRuntimeCache()
+        runtimeServices.queueRefresh({ reason = "event:" .. tostring(sourceEvent or "COOLDOWN_VIEWER_UPDATE") })
+    end
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, dispatch)
+    else
+        dispatch()
+    end
+end
+
 local function safeRefreshOptionsControls()
     if refreshOptionsControls then
         refreshOptionsControls()
@@ -5247,6 +5315,21 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
     if provider and provider.HandleEvent then
         provider:HandleEvent(event)
+    end
+
+    if event == "SPELL_UPDATE_COOLDOWN" then
+        runtimeServices.queueCoalescedCooldownRefresh("cooldown")
+        return
+    end
+
+    if event == "SPELL_UPDATE_CHARGES" then
+        runtimeServices.queueCoalescedCooldownRefresh("charges")
+        return
+    end
+
+    if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED" or event == "COOLDOWN_VIEWER_DATA_LOADED" then
+        runtimeServices.queueCooldownViewerRefresh(event)
+        return
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
