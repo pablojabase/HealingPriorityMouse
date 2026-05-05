@@ -334,6 +334,7 @@ local lastGroupAuraRefresh = 0
 local updateCachedGlowState
 local getSafeCharges
 local plainNumber
+local numberLE
 local numberGT
 
 local function getNowTime()
@@ -965,7 +966,7 @@ local function isNilValue(value)
     return false
 end
 
-local function numberLE(value, limit)
+numberLE = function(value, limit)
     local ok, result = pcall(function()
         return value <= limit
     end)
