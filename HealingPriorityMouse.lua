@@ -4473,12 +4473,15 @@ refreshOptionsControls = function()
         if not offsetX then
             offsetX = 18
         end
-        if offsetX < -300 then
-            offsetX = -300
-        elseif offsetX > 300 then
-            offsetX = 300
+        local sliderOffsetX = offsetX
+        if sliderOffsetX < -50 then
+            sliderOffsetX = -50
+        elseif sliderOffsetX > 50 then
+            sliderOffsetX = 50
         end
-        optionsControls.cursorOffsetXSlider:SetValue(offsetX)
+        optionsControls.suppressCursorOffsetXSliderEvents = true
+        optionsControls.cursorOffsetXSlider:SetValue(sliderOffsetX)
+        optionsControls.suppressCursorOffsetXSliderEvents = false
         optionsControls.cursorOffsetXInput:SetText(string.format("%.0f", offsetX))
     end
     if optionsControls.cursorOffsetYSlider then
@@ -4486,12 +4489,15 @@ refreshOptionsControls = function()
         if not offsetY then
             offsetY = 18
         end
-        if offsetY < -300 then
-            offsetY = -300
-        elseif offsetY > 300 then
-            offsetY = 300
+        local sliderOffsetY = offsetY
+        if sliderOffsetY < -50 then
+            sliderOffsetY = -50
+        elseif sliderOffsetY > 50 then
+            sliderOffsetY = 50
         end
-        optionsControls.cursorOffsetYSlider:SetValue(offsetY)
+        optionsControls.suppressCursorOffsetYSliderEvents = true
+        optionsControls.cursorOffsetYSlider:SetValue(sliderOffsetY)
+        optionsControls.suppressCursorOffsetYSliderEvents = false
         optionsControls.cursorOffsetYInput:SetText(string.format("%.0f", offsetY))
     end
     local isGeneralTabActive = (optionsFrame.activeTab or "general") == "general"
@@ -4724,17 +4730,17 @@ local function createOptionsFrame()
             table.insert(UISpecialFrames, frameName)
         end
     end
-    frame:SetSize(760, 560)
+    frame:SetSize(800, 640)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:SetResizable(true)
     if frame.SetResizeBounds then
-        frame:SetResizeBounds(640, 500, 1100, 900)
+        frame:SetResizeBounds(760, 640, 1100, 900)
     else
         if frame.SetMinResize then
-            frame:SetMinResize(640, 500)
+            frame:SetMinResize(760, 640)
         end
         if frame.SetMaxResize then
             frame:SetMaxResize(1100, 900)
@@ -4951,12 +4957,12 @@ local function createOptionsFrame()
 
     local cursorOffsetXSlider = CreateFrame("Slider", "HealingPriorityMouseCursorOffsetXSlider", frame, "OptionsSliderTemplate")
     cursorOffsetXSlider:SetPoint("TOPLEFT", cursorOffsetXLabel, "BOTTOMLEFT", 0, -18)
-    cursorOffsetXSlider:SetMinMaxValues(-300, 300)
+    cursorOffsetXSlider:SetMinMaxValues(-50, 50)
     cursorOffsetXSlider:SetValueStep(1)
     cursorOffsetXSlider:SetObeyStepOnDrag(true)
     cursorOffsetXSlider:SetWidth(240)
-    _G[cursorOffsetXSlider:GetName() .. "Low"]:SetText("-300")
-    _G[cursorOffsetXSlider:GetName() .. "High"]:SetText("300")
+    _G[cursorOffsetXSlider:GetName() .. "Low"]:SetText("-50")
+    _G[cursorOffsetXSlider:GetName() .. "High"]:SetText("50")
     _G[cursorOffsetXSlider:GetName() .. "Text"]:SetText("")
 
     local cursorOffsetXInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -4973,8 +4979,7 @@ local function createOptionsFrame()
                 value = 300
             end
             HealingPriorityMouseDB.cursorOffsetX = value
-            cursorOffsetXSlider:SetValue(value)
-            self:SetText(string.format("%.0f", value))
+            refreshOptionsControls()
             refresh()
         else
             local current = tonumber(HealingPriorityMouseDB.cursorOffsetX) or 18
@@ -4990,6 +4995,9 @@ local function createOptionsFrame()
     end)
 
     cursorOffsetXSlider:SetScript("OnValueChanged", function(self, value)
+        if optionsControls and optionsControls.suppressCursorOffsetXSliderEvents then
+            return
+        end
         local rounded
         if value >= 0 then
             rounded = math.floor(value + 0.5)
@@ -5007,12 +5015,12 @@ local function createOptionsFrame()
 
     local cursorOffsetYSlider = CreateFrame("Slider", "HealingPriorityMouseCursorOffsetYSlider", frame, "OptionsSliderTemplate")
     cursorOffsetYSlider:SetPoint("TOPLEFT", cursorOffsetYLabel, "BOTTOMLEFT", 0, -18)
-    cursorOffsetYSlider:SetMinMaxValues(-300, 300)
+    cursorOffsetYSlider:SetMinMaxValues(-50, 50)
     cursorOffsetYSlider:SetValueStep(1)
     cursorOffsetYSlider:SetObeyStepOnDrag(true)
     cursorOffsetYSlider:SetWidth(240)
-    _G[cursorOffsetYSlider:GetName() .. "Low"]:SetText("-300")
-    _G[cursorOffsetYSlider:GetName() .. "High"]:SetText("300")
+    _G[cursorOffsetYSlider:GetName() .. "Low"]:SetText("-50")
+    _G[cursorOffsetYSlider:GetName() .. "High"]:SetText("50")
     _G[cursorOffsetYSlider:GetName() .. "Text"]:SetText("")
 
     local cursorOffsetYInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -5029,8 +5037,7 @@ local function createOptionsFrame()
                 value = 300
             end
             HealingPriorityMouseDB.cursorOffsetY = value
-            cursorOffsetYSlider:SetValue(value)
-            self:SetText(string.format("%.0f", value))
+            refreshOptionsControls()
             refresh()
         else
             local current = tonumber(HealingPriorityMouseDB.cursorOffsetY) or 18
@@ -5046,6 +5053,9 @@ local function createOptionsFrame()
     end)
 
     cursorOffsetYSlider:SetScript("OnValueChanged", function(self, value)
+        if optionsControls and optionsControls.suppressCursorOffsetYSliderEvents then
+            return
+        end
         local rounded
         if value >= 0 then
             rounded = math.floor(value + 0.5)
@@ -5054,6 +5064,18 @@ local function createOptionsFrame()
         end
         HealingPriorityMouseDB.cursorOffsetY = rounded
         cursorOffsetYInput:SetText(string.format("%.0f", rounded))
+        refresh()
+    end)
+
+    local resetPositionScaleButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    resetPositionScaleButton:SetSize(210, 24)
+    resetPositionScaleButton:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 12)
+    resetPositionScaleButton:SetText("Reset Position + Scale")
+    resetPositionScaleButton:SetScript("OnClick", function()
+        HealingPriorityMouseDB.scale = defaults.scale or 1.0
+        HealingPriorityMouseDB.cursorOffsetX = defaults.cursorOffsetX or 18
+        HealingPriorityMouseDB.cursorOffsetY = defaults.cursorOffsetY or 18
+        refreshOptionsControls()
         refresh()
     end)
 
@@ -5511,6 +5533,7 @@ local function createOptionsFrame()
         cursorOffsetXInput = cursorOffsetXInput,
         cursorOffsetYSlider = cursorOffsetYSlider,
         cursorOffsetYInput = cursorOffsetYInput,
+        resetPositionScaleButton = resetPositionScaleButton,
         customSpellDropdown = customSpellDropdown,
         customSpellInput = customSpellInput,
         lifebloomThresholdLabel = lifebloomThresholdLabel,
@@ -5537,6 +5560,7 @@ local function createOptionsFrame()
             opacityLabel, opacitySlider, opacityInput,
             cursorOffsetXLabel, cursorOffsetXSlider, cursorOffsetXInput,
             cursorOffsetYLabel, cursorOffsetYSlider, cursorOffsetYInput,
+            resetPositionScaleButton,
             customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton,
             removeAllSpellsButton,
             customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
