@@ -10,6 +10,7 @@ local defaults = {
     hideOutOfCombat = false,
     scale = 1.0,
     opacity = 1.0,
+    iconSpacing = 4,
     cursorOffsetX = 18,
     cursorOffsetY = 18,
     showSpellNames = false,
@@ -4071,7 +4072,15 @@ local function layoutEntries(entries)
 
     root:Show()
 
-    local spacing = 4
+    local spacing = tonumber(HealingPriorityMouseDB.iconSpacing)
+    if not spacing then
+        spacing = 4
+    end
+    if spacing < 0 then
+        spacing = 0
+    elseif spacing > 10 then
+        spacing = 10
+    end
     local size = 26 * (HealingPriorityMouseDB.scale or 1)
     local showBorders = HealingPriorityMouseDB.showBorders and true or false
     for i = 1, #entries do
@@ -4468,6 +4477,19 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+    if optionsControls.iconSpacingSlider then
+        local iconSpacing = tonumber(db.iconSpacing)
+        if not iconSpacing then
+            iconSpacing = 4
+        end
+        if iconSpacing < 0 then
+            iconSpacing = 0
+        elseif iconSpacing > 10 then
+            iconSpacing = 10
+        end
+        optionsControls.iconSpacingSlider:SetValue(iconSpacing)
+        optionsControls.iconSpacingInput:SetText(string.format("%.1f", iconSpacing))
+    end
     if optionsControls.cursorOffsetXSlider then
         local offsetX = tonumber(db.cursorOffsetX)
         if not offsetX then
@@ -4730,17 +4752,17 @@ local function createOptionsFrame()
             table.insert(UISpecialFrames, frameName)
         end
     end
-    frame:SetSize(800, 640)
+    frame:SetSize(800, 720)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:SetResizable(true)
     if frame.SetResizeBounds then
-        frame:SetResizeBounds(760, 640, 1100, 900)
+        frame:SetResizeBounds(760, 720, 1100, 900)
     else
         if frame.SetMinResize then
-            frame:SetMinResize(760, 640)
+            frame:SetMinResize(760, 720)
         end
         if frame.SetMaxResize then
             frame:SetMaxResize(1100, 900)
@@ -4951,8 +4973,64 @@ local function createOptionsFrame()
         end
     end)
 
+    local iconSpacingLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    iconSpacingLabel:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -24)
+    iconSpacingLabel:SetText("Icon spacing")
+
+    local iconSpacingSlider = CreateFrame("Slider", "HealingPriorityMouseIconSpacingSlider", frame, "OptionsSliderTemplate")
+    iconSpacingSlider:SetPoint("TOPLEFT", iconSpacingLabel, "BOTTOMLEFT", 0, -18)
+    iconSpacingSlider:SetMinMaxValues(0, 10)
+    iconSpacingSlider:SetValueStep(0.1)
+    iconSpacingSlider:SetObeyStepOnDrag(true)
+    iconSpacingSlider:SetWidth(240)
+    _G[iconSpacingSlider:GetName() .. "Low"]:SetText("0")
+    _G[iconSpacingSlider:GetName() .. "High"]:SetText("10")
+    _G[iconSpacingSlider:GetName() .. "Text"]:SetText("")
+
+    local iconSpacingInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    iconSpacingInput:SetSize(56, 24)
+    iconSpacingInput:SetPoint("LEFT", iconSpacingSlider, "RIGHT", 16, 0)
+    iconSpacingInput:SetAutoFocus(false)
+    iconSpacingInput:SetNumeric(false)
+    iconSpacingInput:SetScript("OnEnterPressed", function(self)
+        local value = tonumber(self:GetText())
+        if value then
+            if value < 0 then
+                value = 0
+            elseif value > 10 then
+                value = 10
+            end
+            HealingPriorityMouseDB.iconSpacing = value
+            iconSpacingSlider:SetValue(value)
+            self:SetText(string.format("%.1f", value))
+            refresh()
+        else
+            local current = tonumber(HealingPriorityMouseDB.iconSpacing) or 4
+            self:SetText(string.format("%.1f", current))
+            msg("usage: icon spacing 0-10")
+        end
+        self:ClearFocus()
+    end)
+    iconSpacingInput:SetScript("OnEscapePressed", function(self)
+        local current = tonumber(HealingPriorityMouseDB.iconSpacing) or 4
+        if current < 0 then
+            current = 0
+        elseif current > 10 then
+            current = 10
+        end
+        self:SetText(string.format("%.1f", current))
+        self:ClearFocus()
+    end)
+
+    iconSpacingSlider:SetScript("OnValueChanged", function(self, value)
+        local rounded = math.floor((value * 10) + 0.5) / 10
+        HealingPriorityMouseDB.iconSpacing = rounded
+        iconSpacingInput:SetText(string.format("%.1f", rounded))
+        refresh()
+    end)
+
     local cursorOffsetXLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    cursorOffsetXLabel:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -24)
+    cursorOffsetXLabel:SetPoint("TOPLEFT", iconSpacingSlider, "BOTTOMLEFT", 0, -24)
     cursorOffsetXLabel:SetText("Cursor anchor offset X")
 
     local cursorOffsetXSlider = CreateFrame("Slider", "HealingPriorityMouseCursorOffsetXSlider", frame, "OptionsSliderTemplate")
@@ -5529,6 +5607,8 @@ local function createOptionsFrame()
         scaleInput = scaleInput,
         opacitySlider = opacitySlider,
         opacityInput = opacityInput,
+        iconSpacingSlider = iconSpacingSlider,
+        iconSpacingInput = iconSpacingInput,
         cursorOffsetXSlider = cursorOffsetXSlider,
         cursorOffsetXInput = cursorOffsetXInput,
         cursorOffsetYSlider = cursorOffsetYSlider,
@@ -5558,6 +5638,7 @@ local function createOptionsFrame()
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
+            iconSpacingLabel, iconSpacingSlider, iconSpacingInput,
             cursorOffsetXLabel, cursorOffsetXSlider, cursorOffsetXInput,
             cursorOffsetYLabel, cursorOffsetYSlider, cursorOffsetYInput,
             resetPositionScaleButton,
