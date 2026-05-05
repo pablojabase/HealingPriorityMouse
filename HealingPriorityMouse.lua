@@ -2719,7 +2719,7 @@ runtimeServices.shouldShowLifebloomThresholdControls = function()
         return false
     end
 
-    local lifebloomIDs = resolveSpellList("Lifebloom")
+    local lifebloomIDs = resolveSpellIDs("Lifebloom")
     if type(lifebloomIDs) ~= "table" or #lifebloomIDs == 0 then
         return false
     end
