@@ -4078,8 +4078,8 @@ local function layoutEntries(entries)
     end
     if spacing < 0 then
         spacing = 0
-    elseif spacing > 10 then
-        spacing = 10
+    elseif spacing > 20 then
+        spacing = 20
     end
     local size = 26 * (HealingPriorityMouseDB.scale or 1)
     local showBorders = HealingPriorityMouseDB.showBorders and true or false
@@ -4484,8 +4484,8 @@ refreshOptionsControls = function()
         end
         if iconSpacing < 0 then
             iconSpacing = 0
-        elseif iconSpacing > 10 then
-            iconSpacing = 10
+        elseif iconSpacing > 20 then
+            iconSpacing = 20
         end
         optionsControls.iconSpacingSlider:SetValue(iconSpacing)
         optionsControls.iconSpacingInput:SetText(string.format("%.1f", iconSpacing))
@@ -4979,12 +4979,12 @@ local function createOptionsFrame()
 
     local iconSpacingSlider = CreateFrame("Slider", "HealingPriorityMouseIconSpacingSlider", frame, "OptionsSliderTemplate")
     iconSpacingSlider:SetPoint("TOPLEFT", iconSpacingLabel, "BOTTOMLEFT", 0, -18)
-    iconSpacingSlider:SetMinMaxValues(0, 10)
+    iconSpacingSlider:SetMinMaxValues(0, 20)
     iconSpacingSlider:SetValueStep(0.1)
     iconSpacingSlider:SetObeyStepOnDrag(true)
     iconSpacingSlider:SetWidth(240)
     _G[iconSpacingSlider:GetName() .. "Low"]:SetText("0")
-    _G[iconSpacingSlider:GetName() .. "High"]:SetText("10")
+    _G[iconSpacingSlider:GetName() .. "High"]:SetText("20")
     _G[iconSpacingSlider:GetName() .. "Text"]:SetText("")
 
     local iconSpacingInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -4997,8 +4997,8 @@ local function createOptionsFrame()
         if value then
             if value < 0 then
                 value = 0
-            elseif value > 10 then
-                value = 10
+            elseif value > 20 then
+                value = 20
             end
             HealingPriorityMouseDB.iconSpacing = value
             iconSpacingSlider:SetValue(value)
@@ -5007,7 +5007,7 @@ local function createOptionsFrame()
         else
             local current = tonumber(HealingPriorityMouseDB.iconSpacing) or 4
             self:SetText(string.format("%.1f", current))
-            msg("usage: icon spacing 0-10")
+            msg("usage: icon spacing 0-20")
         end
         self:ClearFocus()
     end)
@@ -5015,8 +5015,8 @@ local function createOptionsFrame()
         local current = tonumber(HealingPriorityMouseDB.iconSpacing) or 4
         if current < 0 then
             current = 0
-        elseif current > 10 then
-            current = 10
+        elseif current > 20 then
+            current = 20
         end
         self:SetText(string.format("%.1f", current))
         self:ClearFocus()
