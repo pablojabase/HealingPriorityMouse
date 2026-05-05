@@ -2702,10 +2702,6 @@ getSpecID = function()
     return specID
 end
 
-local function getLifebloomTargetThreshold()
-    return 1
-end
-
 runtimeServices.clampLifebloomRefreshThresholdSeconds = function(value)
     if not value then
         return nil
@@ -3622,7 +3618,7 @@ local SPELL_POLICIES = {
         condition = "lifebloomRefreshOnMouseover",
         fromPlayerOnly = true,
         threshold = function()
-            return getLifebloomTargetThreshold()
+            return 1
         end,
         refreshThreshold = function()
             return runtimeServices.getLifebloomRefreshThresholdSeconds()
