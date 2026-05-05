@@ -4418,7 +4418,11 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
-    local showLifebloomThresholdControls = runtimeServices.shouldShowLifebloomThresholdControls and runtimeServices.shouldShowLifebloomThresholdControls() or false
+    local isGeneralTabActive = (optionsFrame.activeTab or "general") == "general"
+    local showLifebloomThresholdControls = isGeneralTabActive
+        and runtimeServices.shouldShowLifebloomThresholdControls
+        and runtimeServices.shouldShowLifebloomThresholdControls()
+        or false
     if optionsControls.lifebloomThresholdLabel then
         optionsControls.lifebloomThresholdLabel:SetShown(showLifebloomThresholdControls)
     end
@@ -5182,6 +5186,17 @@ local function createOptionsFrame()
             end
         end
 
+        local showLifebloomThresholdControls = showGeneral
+            and runtimeServices.shouldShowLifebloomThresholdControls
+            and runtimeServices.shouldShowLifebloomThresholdControls()
+            or false
+        if optionsControls and optionsControls.lifebloomThresholdLabel then
+            optionsControls.lifebloomThresholdLabel:SetShown(showLifebloomThresholdControls)
+        end
+        if optionsControls and optionsControls.lifebloomThresholdInput then
+            optionsControls.lifebloomThresholdInput:SetShown(showLifebloomThresholdControls)
+        end
+
         if PanelTemplates_SetTab then
             PanelTemplates_SetTab(frame, showGeneral and 1 or 2)
         else
@@ -5329,7 +5344,7 @@ local function createOptionsFrame()
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
             customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton,
-            lifebloomThresholdLabel, lifebloomThresholdInput, removeAllSpellsButton,
+            removeAllSpellsButton,
             customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
         },
         devWidgets = {
