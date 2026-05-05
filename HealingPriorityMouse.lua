@@ -10,6 +10,8 @@ local defaults = {
     hideOutOfCombat = false,
     scale = 1.0,
     opacity = 1.0,
+    cursorOffsetX = 18,
+    cursorOffsetY = 18,
     showSpellNames = false,
     spellNamePosition = "bottom", -- bottom | top
     showCharges = true,
@@ -4169,8 +4171,16 @@ root:SetScript("OnUpdate", function()
 
     local scale = UIParent:GetEffectiveScale()
     local x, y = GetCursorPosition()
+    local offsetX = tonumber(HealingPriorityMouseDB.cursorOffsetX)
+    local offsetY = tonumber(HealingPriorityMouseDB.cursorOffsetY)
+    if not offsetX then
+        offsetX = 18
+    end
+    if not offsetY then
+        offsetY = 18
+    end
     root:ClearAllPoints()
-    root:SetPoint("CENTER", UIParent, "BOTTOMLEFT", (x / scale) + 18, (y / scale) + 18)
+    root:SetPoint("CENTER", UIParent, "BOTTOMLEFT", (x / scale) + offsetX, (y / scale) + offsetY)
 end)
 
 local function refresh()
@@ -4458,6 +4468,32 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+    if optionsControls.cursorOffsetXSlider then
+        local offsetX = tonumber(db.cursorOffsetX)
+        if not offsetX then
+            offsetX = 18
+        end
+        if offsetX < -300 then
+            offsetX = -300
+        elseif offsetX > 300 then
+            offsetX = 300
+        end
+        optionsControls.cursorOffsetXSlider:SetValue(offsetX)
+        optionsControls.cursorOffsetXInput:SetText(string.format("%.0f", offsetX))
+    end
+    if optionsControls.cursorOffsetYSlider then
+        local offsetY = tonumber(db.cursorOffsetY)
+        if not offsetY then
+            offsetY = 18
+        end
+        if offsetY < -300 then
+            offsetY = -300
+        elseif offsetY > 300 then
+            offsetY = 300
+        end
+        optionsControls.cursorOffsetYSlider:SetValue(offsetY)
+        optionsControls.cursorOffsetYInput:SetText(string.format("%.0f", offsetY))
+    end
     local isGeneralTabActive = (optionsFrame.activeTab or "general") == "general"
     local showLifebloomThresholdControls = isGeneralTabActive
         and runtimeServices.shouldShowLifebloomThresholdControls
@@ -4907,6 +4943,118 @@ local function createOptionsFrame()
             opacityInput:SetText(tostring(math.floor((current * 100) + 0.5)))
             refresh()
         end
+    end)
+
+    local cursorOffsetXLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cursorOffsetXLabel:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -24)
+    cursorOffsetXLabel:SetText("Cursor anchor offset X")
+
+    local cursorOffsetXSlider = CreateFrame("Slider", "HealingPriorityMouseCursorOffsetXSlider", frame, "OptionsSliderTemplate")
+    cursorOffsetXSlider:SetPoint("TOPLEFT", cursorOffsetXLabel, "BOTTOMLEFT", 0, -18)
+    cursorOffsetXSlider:SetMinMaxValues(-300, 300)
+    cursorOffsetXSlider:SetValueStep(1)
+    cursorOffsetXSlider:SetObeyStepOnDrag(true)
+    cursorOffsetXSlider:SetWidth(240)
+    _G[cursorOffsetXSlider:GetName() .. "Low"]:SetText("-300")
+    _G[cursorOffsetXSlider:GetName() .. "High"]:SetText("300")
+    _G[cursorOffsetXSlider:GetName() .. "Text"]:SetText("")
+
+    local cursorOffsetXInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    cursorOffsetXInput:SetSize(56, 24)
+    cursorOffsetXInput:SetPoint("LEFT", cursorOffsetXSlider, "RIGHT", 16, 0)
+    cursorOffsetXInput:SetAutoFocus(false)
+    cursorOffsetXInput:SetNumeric(false)
+    cursorOffsetXInput:SetScript("OnEnterPressed", function(self)
+        local value = tonumber(self:GetText())
+        if value then
+            if value < -300 then
+                value = -300
+            elseif value > 300 then
+                value = 300
+            end
+            HealingPriorityMouseDB.cursorOffsetX = value
+            cursorOffsetXSlider:SetValue(value)
+            self:SetText(string.format("%.0f", value))
+            refresh()
+        else
+            local current = tonumber(HealingPriorityMouseDB.cursorOffsetX) or 18
+            self:SetText(string.format("%.0f", current))
+            msg("usage: cursor offset X -300 to 300")
+        end
+        self:ClearFocus()
+    end)
+    cursorOffsetXInput:SetScript("OnEscapePressed", function(self)
+        local current = tonumber(HealingPriorityMouseDB.cursorOffsetX) or 18
+        self:SetText(string.format("%.0f", current))
+        self:ClearFocus()
+    end)
+
+    cursorOffsetXSlider:SetScript("OnValueChanged", function(self, value)
+        local rounded
+        if value >= 0 then
+            rounded = math.floor(value + 0.5)
+        else
+            rounded = math.ceil(value - 0.5)
+        end
+        HealingPriorityMouseDB.cursorOffsetX = rounded
+        cursorOffsetXInput:SetText(string.format("%.0f", rounded))
+        refresh()
+    end)
+
+    local cursorOffsetYLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cursorOffsetYLabel:SetPoint("TOPLEFT", cursorOffsetXSlider, "BOTTOMLEFT", 0, -24)
+    cursorOffsetYLabel:SetText("Cursor anchor offset Y")
+
+    local cursorOffsetYSlider = CreateFrame("Slider", "HealingPriorityMouseCursorOffsetYSlider", frame, "OptionsSliderTemplate")
+    cursorOffsetYSlider:SetPoint("TOPLEFT", cursorOffsetYLabel, "BOTTOMLEFT", 0, -18)
+    cursorOffsetYSlider:SetMinMaxValues(-300, 300)
+    cursorOffsetYSlider:SetValueStep(1)
+    cursorOffsetYSlider:SetObeyStepOnDrag(true)
+    cursorOffsetYSlider:SetWidth(240)
+    _G[cursorOffsetYSlider:GetName() .. "Low"]:SetText("-300")
+    _G[cursorOffsetYSlider:GetName() .. "High"]:SetText("300")
+    _G[cursorOffsetYSlider:GetName() .. "Text"]:SetText("")
+
+    local cursorOffsetYInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    cursorOffsetYInput:SetSize(56, 24)
+    cursorOffsetYInput:SetPoint("LEFT", cursorOffsetYSlider, "RIGHT", 16, 0)
+    cursorOffsetYInput:SetAutoFocus(false)
+    cursorOffsetYInput:SetNumeric(false)
+    cursorOffsetYInput:SetScript("OnEnterPressed", function(self)
+        local value = tonumber(self:GetText())
+        if value then
+            if value < -300 then
+                value = -300
+            elseif value > 300 then
+                value = 300
+            end
+            HealingPriorityMouseDB.cursorOffsetY = value
+            cursorOffsetYSlider:SetValue(value)
+            self:SetText(string.format("%.0f", value))
+            refresh()
+        else
+            local current = tonumber(HealingPriorityMouseDB.cursorOffsetY) or 18
+            self:SetText(string.format("%.0f", current))
+            msg("usage: cursor offset Y -300 to 300")
+        end
+        self:ClearFocus()
+    end)
+    cursorOffsetYInput:SetScript("OnEscapePressed", function(self)
+        local current = tonumber(HealingPriorityMouseDB.cursorOffsetY) or 18
+        self:SetText(string.format("%.0f", current))
+        self:ClearFocus()
+    end)
+
+    cursorOffsetYSlider:SetScript("OnValueChanged", function(self, value)
+        local rounded
+        if value >= 0 then
+            rounded = math.floor(value + 0.5)
+        else
+            rounded = math.ceil(value - 0.5)
+        end
+        HealingPriorityMouseDB.cursorOffsetY = rounded
+        cursorOffsetYInput:SetText(string.format("%.0f", rounded))
+        refresh()
     end)
 
     local customSpellsLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -5359,6 +5507,10 @@ local function createOptionsFrame()
         scaleInput = scaleInput,
         opacitySlider = opacitySlider,
         opacityInput = opacityInput,
+        cursorOffsetXSlider = cursorOffsetXSlider,
+        cursorOffsetXInput = cursorOffsetXInput,
+        cursorOffsetYSlider = cursorOffsetYSlider,
+        cursorOffsetYInput = cursorOffsetYInput,
         customSpellDropdown = customSpellDropdown,
         customSpellInput = customSpellInput,
         lifebloomThresholdLabel = lifebloomThresholdLabel,
@@ -5383,6 +5535,8 @@ local function createOptionsFrame()
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
+            cursorOffsetXLabel, cursorOffsetXSlider, cursorOffsetXInput,
+            cursorOffsetYLabel, cursorOffsetYSlider, cursorOffsetYInput,
             customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton,
             removeAllSpellsButton,
             customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
