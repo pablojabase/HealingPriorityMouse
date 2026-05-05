@@ -5555,6 +5555,7 @@ local function createOptionsFrame()
     end)
 
     frame:SetScript("OnShow", function()
+        root:SetFrameStrata("TOOLTIP")
         applyOptionsLayout()
         local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
         if provider and provider.Rebuild then
@@ -5569,6 +5570,10 @@ local function createOptionsFrame()
         end
         refreshOptionsControls()
         setOptionsTab(frame.activeTab or "general")
+    end)
+
+    frame:SetScript("OnHide", function()
+        root:SetFrameStrata("HIGH")
     end)
 
     frame:SetScript("OnSizeChanged", function()
