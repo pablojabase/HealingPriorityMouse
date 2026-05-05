@@ -2708,6 +2708,38 @@ runtimeServices.getLifebloomRefreshThresholdSeconds = function()
     return runtimeServices.clampLifebloomRefreshThresholdSeconds(configured) or 4
 end
 
+runtimeServices.shouldShowLifebloomThresholdControls = function()
+    local classToken = select(2, UnitClass("player"))
+    if classToken ~= "DRUID" then
+        return false
+    end
+
+    local tracked = getCustomTrackedSpells()
+    if type(tracked) ~= "table" or #tracked == 0 then
+        return false
+    end
+
+    local lifebloomIDs = resolveSpellList("Lifebloom")
+    if type(lifebloomIDs) ~= "table" or #lifebloomIDs == 0 then
+        return false
+    end
+
+    local lifebloomByID = {}
+    for _, id in ipairs(lifebloomIDs) do
+        if id then
+            lifebloomByID[id] = true
+        end
+    end
+
+    for _, spellID in ipairs(tracked) do
+        if lifebloomByID[spellID] then
+            return true
+        end
+    end
+
+    return false
+end
+
 local root = CreateFrame("Frame", "HealingPriorityMouseFrame", UIParent)
 root:SetSize(1, 1)
 root:SetFrameStrata("HIGH")
@@ -4363,6 +4395,10 @@ refreshOptionsControls = function()
         return
     end
 
+    if optionsControls.applyLayout then
+        optionsControls.applyLayout()
+    end
+
     local db = HealingPriorityMouseDB
     optionsControls.enabled:SetChecked(db.enabled and true or false)
     if optionsControls.hideOutOfCombat then
@@ -4382,6 +4418,13 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+    local showLifebloomThresholdControls = runtimeServices.shouldShowLifebloomThresholdControls and runtimeServices.shouldShowLifebloomThresholdControls() or false
+    if optionsControls.lifebloomThresholdLabel then
+        optionsControls.lifebloomThresholdLabel:SetShown(showLifebloomThresholdControls)
+    end
+    if optionsControls.lifebloomThresholdInput then
+        optionsControls.lifebloomThresholdInput:SetShown(showLifebloomThresholdControls)
+    end
     if optionsControls.lifebloomThresholdInput then
         optionsControls.lifebloomThresholdInput:SetText(string.format("%.1f", runtimeServices.getLifebloomRefreshThresholdSeconds()))
     end
@@ -5101,8 +5144,14 @@ local function createOptionsFrame()
         lifebloomThresholdInput:ClearAllPoints()
         lifebloomThresholdInput:SetPoint("LEFT", lifebloomThresholdLabel, "RIGHT", 8, 0)
 
+        local showLifebloomThresholdControls = runtimeServices.shouldShowLifebloomThresholdControls and runtimeServices.shouldShowLifebloomThresholdControls() or false
+
         removeAllSpellsButton:ClearAllPoints()
-        removeAllSpellsButton:SetPoint("TOPLEFT", lifebloomThresholdLabel, "BOTTOMLEFT", 0, -10)
+        if showLifebloomThresholdControls then
+            removeAllSpellsButton:SetPoint("TOPLEFT", lifebloomThresholdLabel, "BOTTOMLEFT", 0, -10)
+        else
+            removeAllSpellsButton:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
+        end
 
         customSpellHintIcon:ClearAllPoints()
         customSpellHintIcon:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 2, -8)
@@ -5257,6 +5306,7 @@ local function createOptionsFrame()
         opacityInput = opacityInput,
         customSpellDropdown = customSpellDropdown,
         customSpellInput = customSpellInput,
+        lifebloomThresholdLabel = lifebloomThresholdLabel,
         lifebloomThresholdInput = lifebloomThresholdInput,
         customSpellOptions = {},
         selectedCustomSpellID = nil,
@@ -5272,6 +5322,7 @@ local function createOptionsFrame()
         perfToggle = perfToggle,
         perfSummary = perfSummary,
         providerSummary = providerSummary,
+        applyLayout = applyOptionsLayout,
         generalWidgets = {
             enabled, hideOutOfCombat, charges, borders, glows, showNames,
             namePositionLabel, namePosition,
