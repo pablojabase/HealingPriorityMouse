@@ -2491,6 +2491,21 @@ local function countAuraConceptInGroup(spellKey, fromPlayerOnly)
     return n
 end
 
+local function getAuraConceptMinimumRemainingInGroup(spellKey, fromPlayerOnly)
+    local minimumRemaining = nil
+    for _, unit in ipairs(getGroupUnits()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            local remaining = runtimeServices.getAuraConceptRemainingOnUnit(unit, spellKey, true, fromPlayerOnly)
+            if remaining ~= nil then
+                if (minimumRemaining == nil) or numberLE(remaining, minimumRemaining) then
+                    minimumRemaining = remaining
+                end
+            end
+        end
+    end
+    return minimumRemaining
+end
+
 local function cacheAtonementUnitState(unit, expirationTime, auraInstanceID)
     local unitGUID = unit and UnitGUID(unit)
     if not unitGUID then
@@ -3846,10 +3861,18 @@ local function evaluateSpellPolicy(policyKey, context, addEntry)
             return false
         end
 
+        local refreshThreshold = getPolicyValue(policy.refreshThreshold, context, spellID, policy) or 4
+
         if context.mouseover then
             local remaining = runtimeServices.getAuraConceptRemainingOnUnit(context.mouseover, "Lifebloom", true, true)
-            local refreshThreshold = getPolicyValue(policy.refreshThreshold, context, spellID, policy) or 4
-            if (remaining == nil) or numberLE(remaining, refreshThreshold) then
+            if remaining and numberLE(remaining, refreshThreshold) then
+                return addEntry(label, spellID, iconCount, glowRule, glowContext)
+            end
+        end
+
+        local minimumRemaining = getAuraConceptMinimumRemainingInGroup("Lifebloom", true)
+        if minimumRemaining ~= nil then
+            if numberLE(minimumRemaining, refreshThreshold) then
                 return addEntry(label, spellID, iconCount, glowRule, glowContext)
             end
             return false
@@ -4211,22 +4234,19 @@ local function refresh()
         end
 
         -- Lifebloom refresh-threshold reminders can become visible while currently hidden.
-        -- Schedule a wake exactly when remaining time crosses the configured threshold.
+        -- Schedule a wake exactly when the minimum active Lifebloom remaining time crosses the configured threshold.
         do
             local lifebloomSpellID = resolveSpellID("Lifebloom")
             if lifebloomSpellID
                 and isSpellInTrackedList(lifebloomSpellID)
                 and (not runtimeServices.isCooldownOnlySpellEnabled(lifebloomSpellID)) then
-                local mouseover = getFriendlyMouseover()
-                if mouseover then
-                    local remaining = runtimeServices.getAuraConceptRemainingOnUnit(mouseover, "Lifebloom", true, true)
-                    local refreshThreshold = runtimeServices.getLifebloomRefreshThresholdSeconds()
-                    if remaining and numberGT(remaining, refreshThreshold + 0.01) then
-                        local thresholdCrossAt = now + (remaining - refreshThreshold)
-                        if numberGT(thresholdCrossAt, now + 0.01) then
-                            if not nextWakeAt or thresholdCrossAt < nextWakeAt then
-                                nextWakeAt = thresholdCrossAt
-                            end
+                local minimumRemaining = getAuraConceptMinimumRemainingInGroup("Lifebloom", true)
+                local refreshThreshold = runtimeServices.getLifebloomRefreshThresholdSeconds()
+                if minimumRemaining and numberGT(minimumRemaining, refreshThreshold + 0.01) then
+                    local thresholdCrossAt = now + (minimumRemaining - refreshThreshold)
+                    if numberGT(thresholdCrossAt, now + 0.01) then
+                        if not nextWakeAt or thresholdCrossAt < nextWakeAt then
+                            nextWakeAt = thresholdCrossAt
                         end
                     end
                 end
