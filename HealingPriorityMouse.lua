@@ -288,10 +288,10 @@ local SPELLS = {
     -- Cloudburst Totem (157153) was removed in patch 12.0.0.
     CloudburstTotem = { 157153 },
 
-    Reversion = { 366155 },
+    Reversion = { 366155, 367364 },
     Echo = { 364343 },
     Lifespark = { 443176 },
-    VerdantEmbrace = { 360995 },
+    VerdantEmbrace = { 360995, 361195, 396557, 373514, 409895 },
 
     Atonement = { 194384 },
     AtonementAura = { 81749, 194384, 292010, 292011, 331836, 451513, 451577 },
@@ -1940,7 +1940,7 @@ local CORE_SPELL_KEYS_BY_SPEC = {
     [65] = { "Consecration", "InfusionOfLight", "HolyBulwark" },
     [270] = { "RenewingMist", "StrengthOfTheBlackOx" },
     [264] = { "WaterShield", "HealingStreamTotem", "HealingRain", "Riptide", "CloudburstTotem" },
-    [1468] = { "Reversion", "Echo", "Lifespark" },
+    [1468] = { "Reversion", "Echo", "VerdantEmbrace", "Lifespark" },
     [256] = { "Atonement", "PowerWordShield", "PowerWordRadiance", "Penance" },
     [257] = { "PrayerOfMending", "Halo", "Lightweaver", "Premonitions" },
 }
@@ -3694,6 +3694,11 @@ local SPELL_POLICIES = {
         readiness = "cooldown",
         essenceMin = 2,
     },
+    VerdantEmbrace = {
+        label = "Verdant Embrace",
+        condition = "readyAlways",
+        readiness = "chargeOrCooldown",
+    },
     Lifespark = {
         label = "Lifespark",
         condition = "playerAuraActive",
@@ -3953,13 +3958,13 @@ local function evaluateSpellPolicy(policyKey, context, addEntry)
             return false
         end
         if context.mouseover then
-            if isSpellAtMaxCharges(spellID) or not isAuraActive(context.mouseover, auraSpellID, true, true) then
+            if isSpellAtMaxCharges(spellID) or not isAuraConceptActive(context.mouseover, "Reversion", true, true) then
                 return addEntry(label, spellID, iconCount, glowRule, glowContext)
             end
             return false
         end
         local alive = countAliveGroupUnits()
-        local active = countAuraInGroup(auraSpellID, true)
+        local active = countAuraConceptInGroup("Reversion", true)
         if active < alive then
             return addEntry(label, spellID, iconCount, glowRule, glowContext)
         end
@@ -4192,6 +4197,45 @@ root:SetScript("OnUpdate", function()
     root:SetPoint("CENTER", UIParent, "BOTTOMLEFT", (x / scale) + offsetX, (y / scale) + offsetY)
 end)
 
+local function getNextWakeFromRuntimeState(runtimeState, now)
+    if type(runtimeState) ~= "table" then
+        return nil
+    end
+
+    local nextWakeAt = nil
+
+    local cooldownEndTime = plainNumber(runtimeState.cooldownEndTime)
+    if cooldownEndTime and numberGT(cooldownEndTime, now + 0.01) then
+        nextWakeAt = cooldownEndTime
+    end
+
+    local chargesInfo = runtimeState.chargesInfo
+    if chargesInfo and not chargesInfo.unknown then
+        local current = plainNumber(chargesInfo.current)
+        local max = plainNumber(chargesInfo.max)
+        local rechargeStart = plainNumber(chargesInfo.rechargeStart)
+        local rechargeDuration = plainNumber(chargesInfo.rechargeDuration)
+        local chargeModRate = plainNumber(chargesInfo.chargeModRate)
+
+        if current and max and rechargeDuration and current < max and numberGT(rechargeDuration, 0) then
+            if not (chargeModRate and numberGT(chargeModRate, 0)) then
+                chargeModRate = 1
+            end
+            if not (rechargeStart and numberGT(rechargeStart, 0)) then
+                rechargeStart = now
+            end
+            local chargeReadyAt = rechargeStart + (rechargeDuration / chargeModRate)
+            if numberGT(chargeReadyAt, now + 0.01) then
+                if not nextWakeAt or chargeReadyAt < nextWakeAt then
+                    nextWakeAt = chargeReadyAt
+                end
+            end
+        end
+    end
+
+    return nextWakeAt
+end
+
 local function refresh()
     local entries = buildEntries()
     layoutEntries(entries)
@@ -4212,40 +4256,31 @@ local function refresh()
     if queue and queue.RequestAt then
         local now = getNowTime()
         local nextWakeAt = nil
-        for index = 1, #entries do
-            local runtimeState = getSpellRuntimeState(entries[index].spellID)
-            if runtimeState then
-                local cooldownEndTime = plainNumber(runtimeState.cooldownEndTime)
-                if cooldownEndTime and numberGT(cooldownEndTime, now + 0.01) then
-                    if not nextWakeAt or cooldownEndTime < nextWakeAt then
-                        nextWakeAt = cooldownEndTime
-                    end
-                end
+        local wakeSeenSpellIDs = {}
 
-                local chargesInfo = runtimeState.chargesInfo
-                if chargesInfo and not chargesInfo.unknown then
-                    local current = plainNumber(chargesInfo.current)
-                    local max = plainNumber(chargesInfo.max)
-                    local rechargeStart = plainNumber(chargesInfo.rechargeStart)
-                    local rechargeDuration = plainNumber(chargesInfo.rechargeDuration)
-                    local chargeModRate = plainNumber(chargesInfo.chargeModRate)
-
-                    if current and max and rechargeDuration and current < max and numberGT(rechargeDuration, 0) then
-                        if not (chargeModRate and numberGT(chargeModRate, 0)) then
-                            chargeModRate = 1
-                        end
-                        if not (rechargeStart and numberGT(rechargeStart, 0)) then
-                            rechargeStart = now
-                        end
-                        local chargeReadyAt = rechargeStart + (rechargeDuration / chargeModRate)
-                        if numberGT(chargeReadyAt, now + 0.01) then
-                            if not nextWakeAt or chargeReadyAt < nextWakeAt then
-                                nextWakeAt = chargeReadyAt
-                            end
-                        end
-                    end
-                end
+        local function considerSpellWake(spellID)
+            local normalizedSpellID = normalizeSpellID(spellID)
+            if not normalizedSpellID or wakeSeenSpellIDs[normalizedSpellID] then
+                return
             end
+            wakeSeenSpellIDs[normalizedSpellID] = true
+
+            local runtimeState = getSpellRuntimeState(normalizedSpellID)
+            local wakeAt = getNextWakeFromRuntimeState(runtimeState, now)
+            if wakeAt and (not nextWakeAt or wakeAt < nextWakeAt) then
+                nextWakeAt = wakeAt
+            end
+        end
+
+        for index = 1, #entries do
+            considerSpellWake(entries[index].spellID)
+        end
+
+        -- Also schedule wake-ups from tracked spells currently hidden due to cooldown/charges.
+        -- Some cooldown-finish transitions do not emit reliable refresh events, so this keeps state deterministic.
+        local trackedSpells = getCustomTrackedSpells()
+        for index = 1, #trackedSpells do
+            considerSpellWake(trackedSpells[index])
         end
 
         -- Lifebloom refresh-threshold reminders can become visible while currently hidden.
