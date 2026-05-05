@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added a per-tracked-spell `CD-only` mode so selected spells can be shown only while on cooldown, including slash controls via `/hpm cdonly list|add|remove`.
+- Added an out-of-combat visibility toggle (`Hide icons out of combat`) plus `/hpm oochide on|off`.
+- Added a configurable Lifebloom refresh threshold (`/hpm lifebloomthreshold <seconds>`, default `4s`) and a mouseover refresh reminder path that triggers when Lifebloom is missing or nearing expiration.
+
 ### Changed
 - Coalesced back-to-back `SPELL_UPDATE_COOLDOWN` and `SPELL_UPDATE_CHARGES` events into a single queued refresh pass to reduce redundant recomputation during high event churn.
 - Coalesced Cooldown Viewer metadata update events (`COOLDOWN_VIEWER_*`) behind a versioned deferred refresh so stale callbacks cannot trigger duplicate refresh work.

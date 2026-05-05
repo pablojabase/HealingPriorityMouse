@@ -7,6 +7,7 @@ HealingPriorityMouseDB = HealingPriorityMouseDB or {}
 
 local defaults = {
     enabled = true,
+    hideOutOfCombat = false,
     scale = 1.0,
     opacity = 1.0,
     showSpellNames = false,
@@ -18,9 +19,11 @@ local defaults = {
     devLiveLogging = false,
     devPerfMonitorEnabled = false,
     cooldownProviderMode = "cdm-hybrid",
+    lifebloomRefreshThreshold = 4,
     customTrackedSpells = {},
     customTrackedSpellsByCharacter = {},
     customTrackedSpecsInitializedByCharacter = {},
+    cooldownOnlySpellsByCharacter = {},
     minimapButtonAngle = 225,
 }
 
@@ -854,6 +857,26 @@ local function findAuraConceptOnUnit(unit, spellKey, filter, requirePlayerOwned)
     return matchedAura
 end
 
+runtimeServices.getAuraConceptRemainingOnUnit = function(unit, spellKey, helpful, fromPlayer)
+    if not (unit and UnitExists(unit)) then
+        return nil
+    end
+    local filter = helpful and "HELPFUL" or "HARMFUL"
+    local aura = findAuraConceptOnUnit(unit, spellKey, filter, fromPlayer)
+    if not aura then
+        return nil
+    end
+    local expirationTime = plainNumber(getAuraDataExpirationTime(aura))
+    if not expirationTime or not numberGT(expirationTime, 0) then
+        return nil
+    end
+    local remaining = expirationTime - getNowTime()
+    if numberLE(remaining, 0) then
+        return 0
+    end
+    return remaining
+end
+
 local function isPlayerTotemActive(spellID)
     if not spellID or not GetTotemInfo then
         return false
@@ -1637,6 +1660,12 @@ local function sanitizeCustomTrackedSpellsInDB()
     if type(db.customTrackedSpecsInitializedByCharacter[characterKey]) ~= "table" then
         db.customTrackedSpecsInitializedByCharacter[characterKey] = {}
     end
+    if type(db.cooldownOnlySpellsByCharacter) ~= "table" then
+        db.cooldownOnlySpellsByCharacter = {}
+    end
+    if type(db.cooldownOnlySpellsByCharacter[characterKey]) ~= "table" then
+        db.cooldownOnlySpellsByCharacter[characterKey] = {}
+    end
 
     local activeList = db.customTrackedSpellsByCharacter[characterKey]
     if type(activeList) ~= "table" then
@@ -1667,6 +1696,17 @@ local function sanitizeCustomTrackedSpellsInDB()
     end
 
     db.customTrackedSpellsByCharacter[characterKey] = normalized
+
+    local sanitizedModes = {}
+    local rawModes = db.cooldownOnlySpellsByCharacter[characterKey]
+    for key, value in pairs(rawModes) do
+        local spellID = plainNumber(key)
+        if spellID and numberGT(spellID, 0) and value == true then
+            sanitizedModes[spellID] = true
+        end
+    end
+    db.cooldownOnlySpellsByCharacter[characterKey] = sanitizedModes
+
     return db.customTrackedSpellsByCharacter[characterKey]
 end
 
@@ -1675,6 +1715,43 @@ local function getCustomTrackedSpells()
         return {}
     end
     return sanitizeCustomTrackedSpellsInDB()
+end
+
+runtimeServices.getCooldownOnlySpellModeMap = function()
+    if not HealingPriorityMouseDB then
+        return {}
+    end
+    sanitizeCustomTrackedSpellsInDB()
+    local characterKey = getTrackedCharacterKey()
+    local map = HealingPriorityMouseDB.cooldownOnlySpellsByCharacter and HealingPriorityMouseDB.cooldownOnlySpellsByCharacter[characterKey]
+    if type(map) ~= "table" then
+        return {}
+    end
+    return map
+end
+
+runtimeServices.isCooldownOnlySpellEnabled = function(spellID)
+    local id = plainNumber(spellID)
+    if not id or not numberGT(id, 0) then
+        return false
+    end
+    return runtimeServices.getCooldownOnlySpellModeMap()[id] == true
+end
+
+runtimeServices.setCooldownOnlySpellEnabled = function(spellID, enabled)
+    local id = plainNumber(spellID)
+    if not id or not numberGT(id, 0) then
+        return false
+    end
+    sanitizeCustomTrackedSpellsInDB()
+    local characterKey = getTrackedCharacterKey()
+    local modeMap = HealingPriorityMouseDB.cooldownOnlySpellsByCharacter[characterKey]
+    if enabled then
+        modeMap[id] = true
+    else
+        modeMap[id] = nil
+    end
+    return true
 end
 
 local function isSpellInTrackedList(spellID)
@@ -2050,6 +2127,11 @@ local function clearAllTrackedSpells()
         db.customTrackedSpecsInitializedByCharacter[characterKey][specID] = true
     end
 
+    if type(db.cooldownOnlySpellsByCharacter) ~= "table" then
+        db.cooldownOnlySpellsByCharacter = {}
+    end
+    db.cooldownOnlySpellsByCharacter[characterKey] = {}
+
     return hadSpells
 end
 
@@ -2078,6 +2160,7 @@ local function removeCustomTrackedSpell(spellID)
         for _, value in ipairs(filtered) do
             activeSpells[#activeSpells + 1] = value
         end
+        runtimeServices.setCooldownOnlySpellEnabled(id, false)
     end
     return removed
 end
@@ -2607,6 +2690,24 @@ local function getLifebloomTargetThreshold()
     return 1
 end
 
+runtimeServices.clampLifebloomRefreshThresholdSeconds = function(value)
+    if not value then
+        return nil
+    end
+    if value < 0.5 then
+        return 0.5
+    end
+    if value > 12 then
+        return 12
+    end
+    return value
+end
+
+runtimeServices.getLifebloomRefreshThresholdSeconds = function()
+    local configured = HealingPriorityMouseDB and plainNumber(HealingPriorityMouseDB.lifebloomRefreshThreshold) or nil
+    return runtimeServices.clampLifebloomRefreshThresholdSeconds(configured) or 4
+end
+
 local root = CreateFrame("Frame", "HealingPriorityMouseFrame", UIParent)
 root:SetSize(1, 1)
 root:SetFrameStrata("HIGH")
@@ -3075,6 +3176,52 @@ local function hasAvailableChargeOrReadyStrict(spellID)
     return false
 end
 
+runtimeServices.shouldShowCooldownOnlySpell = function(spellID)
+    local state = getSpellRuntimeState(spellID)
+    if not state then
+        return false
+    end
+
+    local charges = state.chargesInfo
+    if charges and not charges.unknown then
+        local current = plainNumber(charges.current)
+        local max = plainNumber(charges.max)
+        if current and max and numberGT(max, 1) then
+            return current < max
+        end
+    end
+
+    local cooldownInfo = state.cooldownInfo
+    local duration = plainNumber(cooldownInfo and cooldownInfo.duration)
+    local startTime = plainNumber(cooldownInfo and cooldownInfo.startTime)
+    local isOnGCD = cooldownInfo and isTrueFlag(cooldownInfo.isOnGCD, false)
+    if state.cooldownReady == false and duration and numberGT(duration, REAL_COOLDOWN_MIN_SECONDS) and not isOnGCD then
+        return true
+    end
+
+    if state.cooldownReady == false then
+        local remaining = nil
+        if startTime and duration and numberGT(duration, 0) then
+            remaining = (startTime + duration) - getNowTime()
+        end
+        if remaining and numberGT(remaining, 0.05) and duration and numberGT(duration, REAL_COOLDOWN_MIN_SECONDS) then
+            return true
+        end
+
+        local cached = getCachedGlowState(spellID)
+        if cached and cached.cooldownReady == false and cached.lastSpendTime then
+            local guardWindow = runtimeServices.genericSingleCooldownCastGuardWindow or 1.2
+            if numberLE(getNowTime() - cached.lastSpendTime, guardWindow) then
+                return true
+            end
+        end
+
+        return false
+    end
+
+    return false
+end
+
 runtimeServices.getSpellBaseCooldownSeconds = function(spellID)
     if not (spellID and GetSpellBaseCooldown) then
         return nil
@@ -3424,10 +3571,13 @@ end
 local SPELL_POLICIES = {
     Lifebloom = {
         label = "Lifebloom",
-        condition = "groupAuraBelowThreshold",
+        condition = "lifebloomRefreshOnMouseover",
         fromPlayerOnly = true,
         threshold = function()
             return getLifebloomTargetThreshold()
+        end,
+        refreshThreshold = function()
+            return runtimeServices.getLifebloomRefreshThresholdSeconds()
         end,
     },
     CenarionWard = {
@@ -3651,6 +3801,35 @@ local function evaluateSpellPolicy(policyKey, context, addEntry)
         return false
     end
 
+    if runtimeServices.isCooldownOnlySpellEnabled(spellID) then
+        if runtimeServices.shouldShowCooldownOnlySpell(spellID) then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
+    if policy.condition == "lifebloomRefreshOnMouseover" then
+        if not ready then
+            return false
+        end
+
+        if context.mouseover then
+            local remaining = runtimeServices.getAuraConceptRemainingOnUnit(context.mouseover, "Lifebloom", true, true)
+            local refreshThreshold = getPolicyValue(policy.refreshThreshold, context, spellID, policy) or 4
+            if (remaining == nil) or numberLE(remaining, refreshThreshold) then
+                return addEntry(label, spellID, iconCount, glowRule, glowContext)
+            end
+            return false
+        end
+
+        local threshold = getPolicyValue(policy.threshold, context, spellID, policy) or 1
+        local count = countAuraInGroup(auraSpellID, policy.fromPlayerOnly ~= false)
+        if count < threshold then
+            return addEntry(label, spellID, iconCount, glowRule, glowContext)
+        end
+        return false
+    end
+
     if policy.condition == "groupAuraBelowThreshold" then
         local threshold = getPolicyValue(policy.threshold, context, spellID, policy) or 1
         local count = countAuraInGroup(auraSpellID, policy.fromPlayerOnly ~= false)
@@ -3745,6 +3924,10 @@ local function buildEntries()
         return {}
     end
 
+    if HealingPriorityMouseDB.hideOutOfCombat and InCombatLockdown and not InCombatLockdown() then
+        return {}
+    end
+
     local mouseover = getFriendlyMouseover()
     local entries = {}
     local addedSpellIDs = {}
@@ -3796,6 +3979,7 @@ local function buildEntries()
 
     local customSpells = getCustomTrackedSpells()
     for _, customSpellID in ipairs(customSpells) do
+        local showInCooldownOnlyMode = runtimeServices.isCooldownOnlySpellEnabled(customSpellID)
         local readyForCustomSpell = hasAvailableChargeOrReadyStrict(customSpellID)
         local customPolicyKey, customPolicy = getSpellPolicyBySpellID(customSpellID)
         if customPolicy and (customPolicy.readiness == "renewingMist" or customPolicy.readiness == "lifeCocoon") then
@@ -3803,10 +3987,14 @@ local function buildEntries()
         elseif isLifeCocoonSpell(customSpellID) then
             readyForCustomSpell = isLifeCocoonReady(customSpellID)
         end
+        local shouldShowCustomSpell = readyForCustomSpell
+        if showInCooldownOnlyMode then
+            shouldShowCustomSpell = runtimeServices.shouldShowCooldownOnlySpell(customSpellID)
+        end
         if not isHandledByCoreSpecLogic(customSpellID)
             and isSpellKnownSafe(customSpellID)
-            and readyForCustomSpell
-            and isSpellResourceUsableSafe(customSpellID) then
+            and shouldShowCustomSpell
+            and (showInCooldownOnlyMode or isSpellResourceUsableSafe(customSpellID)) then
             addEntry(getSpellName(customSpellID) or ("Spell " .. tostring(customSpellID)), customSpellID)
         end
     end
@@ -4136,9 +4324,34 @@ local function ensureCustomSpellRow(index)
         end
     end)
 
+    local cooldownOnlyButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    cooldownOnlyButton:SetSize(38, 18)
+    cooldownOnlyButton:SetPoint("RIGHT", removeButton, "LEFT", -4, 0)
+    cooldownOnlyButton:SetText("CD")
+    cooldownOnlyButton:SetScript("OnClick", function()
+        if not row.spellID then
+            return
+        end
+        local enabled = runtimeServices.isCooldownOnlySpellEnabled(row.spellID)
+        if runtimeServices.setCooldownOnlySpellEnabled(row.spellID, not enabled) then
+            refresh()
+            safeRefreshOptionsControls()
+        end
+    end)
+    cooldownOnlyButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Cooldown-only display", 1, 0.82, 0)
+        GameTooltip:AddLine("When enabled, this spell is shown only while it is on cooldown.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    cooldownOnlyButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
     row.icon = icon
     row.label = rowLabel
     row.idLabel = rowSpellID
+    row.cooldownOnlyBtn = cooldownOnlyButton
     row.removeBtn = removeButton
     row:Hide()
     rows[index] = row
@@ -4152,6 +4365,9 @@ refreshOptionsControls = function()
 
     local db = HealingPriorityMouseDB
     optionsControls.enabled:SetChecked(db.enabled and true or false)
+    if optionsControls.hideOutOfCombat then
+        optionsControls.hideOutOfCombat:SetChecked(db.hideOutOfCombat and true or false)
+    end
     optionsControls.charges:SetChecked(db.showCharges and true or false)
     optionsControls.borders:SetChecked(db.showBorders and true or false)
     optionsControls.glows:SetChecked(db.showGlows and true or false)
@@ -4166,6 +4382,9 @@ refreshOptionsControls = function()
     local opacityValue = clampOpacity(tonumber(db.opacity) or 1.0) or 1.0
     optionsControls.opacitySlider:SetValue(opacityValue)
     optionsControls.opacityInput:SetText(tostring(math.floor((opacityValue * 100) + 0.5)))
+    if optionsControls.lifebloomThresholdInput then
+        optionsControls.lifebloomThresholdInput:SetText(string.format("%.1f", runtimeServices.getLifebloomRefreshThresholdSeconds()))
+    end
 
     if optionsControls.liveLoggingToggle then
         optionsControls.liveLoggingToggle:SetChecked(db.devLiveLogging and true or false)
@@ -4255,9 +4474,15 @@ refreshOptionsControls = function()
                 end
 
                 row.idLabel:SetText("(" .. tostring(spellID) .. ")")
+                row.idLabel:ClearAllPoints()
+                row.idLabel:SetPoint("RIGHT", row.cooldownOnlyBtn, "LEFT", -6, 0)
                 row.label:ClearAllPoints()
                 row.label:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
                 row.label:SetPoint("RIGHT", row.idLabel, "LEFT", -6, 0)
+                local cooldownOnlyEnabled = runtimeServices.isCooldownOnlySpellEnabled(spellID)
+                if row.cooldownOnlyBtn then
+                    row.cooldownOnlyBtn:SetText(cooldownOnlyEnabled and "CD*" or "CD")
+                end
                 row.removeBtn:Enable()
                 row:Show()
             end
@@ -4439,8 +4664,16 @@ local function createOptionsFrame()
         refresh()
     end)
 
+    local hideOutOfCombat = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
+    hideOutOfCombat:SetPoint("TOPLEFT", enabled, "BOTTOMLEFT", 0, -8)
+    hideOutOfCombat.Text:SetText("Hide icons out of combat")
+    hideOutOfCombat:SetScript("OnClick", function(self)
+        HealingPriorityMouseDB.hideOutOfCombat = self:GetChecked() and true or false
+        refresh()
+    end)
+
     local charges = CreateFrame("CheckButton", nil, frame, "ChatConfigCheckButtonTemplate")
-    charges:SetPoint("TOPLEFT", enabled, "BOTTOMLEFT", 0, -8)
+    charges:SetPoint("TOPLEFT", hideOutOfCombat, "BOTTOMLEFT", 0, -8)
     charges.Text:SetText("Show charges overlay")
     charges:SetScript("OnClick", function(self)
         HealingPriorityMouseDB.showCharges = self:GetChecked() and true or false
@@ -4671,6 +4904,32 @@ local function createOptionsFrame()
     addManualSpellButton:SetSize(64, 24)
     addManualSpellButton:SetText("Add")
 
+    local lifebloomThresholdLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    lifebloomThresholdLabel:SetText("Lifebloom refresh threshold (s)")
+    lifebloomThresholdLabel:SetJustifyH("LEFT")
+
+    local lifebloomThresholdInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    lifebloomThresholdInput:SetSize(56, 24)
+    lifebloomThresholdInput:SetAutoFocus(false)
+    lifebloomThresholdInput:SetNumeric(false)
+    lifebloomThresholdInput:SetScript("OnEnterPressed", function(self)
+        local value = runtimeServices.clampLifebloomRefreshThresholdSeconds(tonumber(self:GetText()))
+        if value then
+            HealingPriorityMouseDB.lifebloomRefreshThreshold = value
+            self:SetText(string.format("%.1f", value))
+            refresh()
+            refreshOptionsControls()
+        else
+            self:SetText(string.format("%.1f", runtimeServices.getLifebloomRefreshThresholdSeconds()))
+            msg("usage: /hpm lifebloomthreshold 0.5-12")
+        end
+        self:ClearFocus()
+    end)
+    lifebloomThresholdInput:SetScript("OnEscapePressed", function(self)
+        self:SetText(string.format("%.1f", runtimeServices.getLifebloomRefreshThresholdSeconds()))
+        self:ClearFocus()
+    end)
+
     local removeAllSpellsButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     removeAllSpellsButton:SetSize(100, 24)
     removeAllSpellsButton:SetText("Remove All")
@@ -4835,8 +5094,15 @@ local function createOptionsFrame()
         addManualSpellButton:ClearAllPoints()
         addManualSpellButton:SetPoint("LEFT", customSpellInput, "RIGHT", 8, 0)
 
+        lifebloomThresholdLabel:ClearAllPoints()
+        lifebloomThresholdLabel:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
+        lifebloomThresholdLabel:SetWidth(math.max(120, rightColumnWidth - 70))
+
+        lifebloomThresholdInput:ClearAllPoints()
+        lifebloomThresholdInput:SetPoint("LEFT", lifebloomThresholdLabel, "RIGHT", 8, 0)
+
         removeAllSpellsButton:ClearAllPoints()
-        removeAllSpellsButton:SetPoint("TOPLEFT", customSpellInput, "BOTTOMLEFT", 0, -10)
+        removeAllSpellsButton:SetPoint("TOPLEFT", lifebloomThresholdLabel, "BOTTOMLEFT", 0, -10)
 
         customSpellHintIcon:ClearAllPoints()
         customSpellHintIcon:SetPoint("TOPLEFT", removeAllSpellsButton, "BOTTOMLEFT", 2, -8)
@@ -4979,6 +5245,7 @@ local function createOptionsFrame()
 
     optionsControls = {
         enabled = enabled,
+        hideOutOfCombat = hideOutOfCombat,
         charges = charges,
         borders = borders,
         glows = glows,
@@ -4990,6 +5257,7 @@ local function createOptionsFrame()
         opacityInput = opacityInput,
         customSpellDropdown = customSpellDropdown,
         customSpellInput = customSpellInput,
+        lifebloomThresholdInput = lifebloomThresholdInput,
         customSpellOptions = {},
         selectedCustomSpellID = nil,
         addSpellButton = addSpellButton,
@@ -5005,11 +5273,12 @@ local function createOptionsFrame()
         perfSummary = perfSummary,
         providerSummary = providerSummary,
         generalWidgets = {
-            enabled, charges, borders, glows, showNames,
+            enabled, hideOutOfCombat, charges, borders, glows, showNames,
             namePositionLabel, namePosition,
             scaleLabel, scaleSlider, scaleInput,
             opacityLabel, opacitySlider, opacityInput,
-            customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton, removeAllSpellsButton,
+            customSpellsLabel, customSpellDropdown, addSpellButton, customSpellInputLabel, customSpellInput, addManualSpellButton,
+            lifebloomThresholdLabel, lifebloomThresholdInput, removeAllSpellsButton,
             customSpellHintIcon, customSpellHintLabel, customSpellListScroll,
         },
         devWidgets = {
@@ -5284,6 +5553,8 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
 eventFrame:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
 eventFrame:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
@@ -5506,6 +5777,25 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         return
     end
 
+    if cmd == "oochide" then
+        if rest == "on" then
+            HealingPriorityMouseDB.hideOutOfCombat = true
+            msg("hideOutOfCombat = true")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        if rest == "off" then
+            HealingPriorityMouseDB.hideOutOfCombat = false
+            msg("hideOutOfCombat = false")
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+        msg("usage: /hpm oochide on|off")
+        return
+    end
+
     if cmd == "borders" then
         if rest == "on" then
             HealingPriorityMouseDB.showBorders = true
@@ -5558,6 +5848,62 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
             return
         end
         msg("usage: /hpm glowdebug on|off")
+        return
+    end
+
+    if cmd == "lifebloomthreshold" then
+        local value = runtimeServices.clampLifebloomRefreshThresholdSeconds(tonumber(rest))
+        if value then
+            HealingPriorityMouseDB.lifebloomRefreshThreshold = value
+            msg("lifebloomRefreshThreshold = " .. tostring(value) .. "s")
+            refresh()
+            return
+        end
+        msg("usage: /hpm lifebloomthreshold <0.5-12>")
+        return
+    end
+
+    if cmd == "cdonly" then
+        local action, target = rest:match("^(%S+)%s*(.-)$")
+        action = (action or ""):lower()
+        local spellID = resolveCustomSpellInputToSpellID(target or "")
+
+        if action == "list" or rest == "" then
+            local tracked = getCustomTrackedSpells()
+            local any = false
+            for _, trackedSpellID in ipairs(tracked) do
+                if runtimeServices.isCooldownOnlySpellEnabled(trackedSpellID) then
+                    any = true
+                    msg("cdonly -> " .. getSpellLabel(trackedSpellID))
+                end
+            end
+            if not any then
+                msg("cdonly list is empty")
+            end
+            return
+        end
+
+        if (action == "add" or action == "on") and spellID then
+            if not isSpellInTrackedList(spellID) then
+                msg("track the spell first before enabling cdonly")
+                return
+            end
+            runtimeServices.setCooldownOnlySpellEnabled(spellID, true)
+            msg("cdonly enabled for " .. getSpellLabel(spellID))
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+
+        if (action == "remove" or action == "off") and spellID then
+            runtimeServices.setCooldownOnlySpellEnabled(spellID, false)
+            msg("cdonly disabled for " .. getSpellLabel(spellID))
+            refresh()
+            refreshOptionsControls()
+            return
+        end
+
+        msg("usage: /hpm cdonly list | add <spellID|link|name> | remove <spellID|link|name>")
         return
     end
 
@@ -5696,6 +6042,7 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
     end
 
     msg("enabled=" .. tostring(HealingPriorityMouseDB.enabled)
+        .. ", hideOutOfCombat=" .. tostring(HealingPriorityMouseDB.hideOutOfCombat)
         .. ", scale=" .. tostring(HealingPriorityMouseDB.scale)
         .. ", opacity=" .. tostring(math.floor(((HealingPriorityMouseDB.opacity or 1.0) * 100) + 0.5)) .. "%"
         .. ", showCharges=" .. tostring(HealingPriorityMouseDB.showCharges)
@@ -5705,5 +6052,6 @@ SlashCmdList.HEALINGPRIORITYMOUSE = function(msgText)
         .. ", perfSampling=" .. tostring(HealingPriorityMouseDB.devPerfMonitorEnabled)
         .. ", providerMode=" .. tostring(runtimeServices.getConfiguredProviderMode())
         .. ", showSpellNames=" .. tostring(HealingPriorityMouseDB.showSpellNames)
-        .. ", spellNamePosition=" .. tostring(HealingPriorityMouseDB.spellNamePosition))
+        .. ", spellNamePosition=" .. tostring(HealingPriorityMouseDB.spellNamePosition)
+        .. ", lifebloomRefreshThreshold=" .. tostring(runtimeServices.getLifebloomRefreshThresholdSeconds()) .. "s")
 end
