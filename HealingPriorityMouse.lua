@@ -4210,6 +4210,29 @@ local function refresh()
             end
         end
 
+        -- Lifebloom refresh-threshold reminders can become visible while currently hidden.
+        -- Schedule a wake exactly when remaining time crosses the configured threshold.
+        do
+            local lifebloomSpellID = resolveSpellID("Lifebloom")
+            if lifebloomSpellID
+                and isSpellInTrackedList(lifebloomSpellID)
+                and (not runtimeServices.isCooldownOnlySpellEnabled(lifebloomSpellID)) then
+                local mouseover = getFriendlyMouseover()
+                if mouseover then
+                    local remaining = runtimeServices.getAuraConceptRemainingOnUnit(mouseover, "Lifebloom", true, true)
+                    local refreshThreshold = runtimeServices.getLifebloomRefreshThresholdSeconds()
+                    if remaining and numberGT(remaining, refreshThreshold + 0.01) then
+                        local thresholdCrossAt = now + (remaining - refreshThreshold)
+                        if numberGT(thresholdCrossAt, now + 0.01) then
+                            if not nextWakeAt or thresholdCrossAt < nextWakeAt then
+                                nextWakeAt = thresholdCrossAt
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         if nextWakeAt then
             queue:RequestAt(nextWakeAt + 0.03, { reason = "predicted-ready" })
         elseif queue.CancelWake then
