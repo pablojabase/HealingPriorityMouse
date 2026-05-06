@@ -346,6 +346,7 @@ local function getNowTime()
     end
     return 0
 end
+ns.getNow = getNowTime
 
 local function isUsableString(value)
     if type(value) ~= "string" then
@@ -955,6 +956,7 @@ plainNumber = function(value)
     end
     return nil
 end
+ns.safeNumber = plainNumber
 
 local function isNilValue(value)
     local ok, result = pcall(function()
@@ -1041,6 +1043,7 @@ local function invalidateSpellRuntimeCache()
     wipeTableKeys(spellRuntimeCache.bookBase)
     wipeTableKeys(spellRuntimeCache.state)
 end
+runtimeServices.invalidateSpellRuntimeCache = invalidateSpellRuntimeCache
 
 local function normalizeSpellID(value)
     local numberValue = plainNumber(value)
@@ -1053,6 +1056,7 @@ local function normalizeSpellID(value)
     end
     return rounded
 end
+ns.normalizeSpellID = normalizeSpellID
 
 local function getCachedSpellRuntimeValue(bucket, spellID, loader)
     local normalizedSpellID = normalizeSpellID(spellID)
@@ -2046,6 +2050,12 @@ local function addCustomTrackedSpell(spellID)
     end
 
     spells[#spells + 1] = id
+    if runtimeServices.invalidateAuraRelevanceLookup then
+        runtimeServices.invalidateAuraRelevanceLookup()
+    end
+    if runtimeServices.resetAuraInstanceTracking then
+        runtimeServices.resetAuraInstanceTracking()
+    end
     return true
 end
 
@@ -2092,6 +2102,12 @@ local function ensureDefaultTrackedSpellsForActiveSpec()
 
     if addedAny then
         sanitizeCustomTrackedSpellsInDB()
+        if runtimeServices.invalidateAuraRelevanceLookup then
+            runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.resetAuraInstanceTracking then
+            runtimeServices.resetAuraInstanceTracking()
+        end
     end
 end
 
@@ -2123,6 +2139,13 @@ local function clearAllTrackedSpells()
     end
     db.cooldownOnlySpellsByCharacter[characterKey] = {}
 
+    if runtimeServices.invalidateAuraRelevanceLookup then
+        runtimeServices.invalidateAuraRelevanceLookup()
+    end
+    if runtimeServices.resetAuraInstanceTracking then
+        runtimeServices.resetAuraInstanceTracking()
+    end
+
     return hadSpells
 end
 
@@ -2152,6 +2175,12 @@ local function removeCustomTrackedSpell(spellID)
             activeSpells[#activeSpells + 1] = value
         end
         runtimeServices.setCooldownOnlySpellEnabled(id, false)
+        if runtimeServices.invalidateAuraRelevanceLookup then
+            runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.resetAuraInstanceTracking then
+            runtimeServices.resetAuraInstanceTracking()
+        end
     end
     return removed
 end
@@ -3796,6 +3825,60 @@ getSpellPolicyBySpellID = function(spellID)
         end
     end
     return nil, nil
+end
+
+if runtimeServices.setAuraRelevanceProvider then
+    runtimeServices.setAuraRelevanceProvider(function()
+        local relevant = {}
+        local seen = {}
+
+        local function addRelevantSpellID(spellID)
+            local id = normalizeSpellID(spellID)
+            if not id or seen[id] then
+                return
+            end
+            seen[id] = true
+            relevant[#relevant + 1] = id
+        end
+
+        local function addRelevantSpellKey(key)
+            if type(key) ~= "string" or key == "" then
+                return
+            end
+            local ids = resolveSpellIDs(key)
+            for index = 1, #ids do
+                addRelevantSpellID(ids[index])
+            end
+        end
+
+        local tracked = getCustomTrackedSpells()
+        for index = 1, #tracked do
+            local trackedSpellID = normalizeSpellID(tracked[index])
+            if trackedSpellID then
+                addRelevantSpellID(trackedSpellID)
+
+                local policyKey, policy = getSpellPolicyBySpellID(trackedSpellID)
+                if policyKey and type(policy) == "table" then
+                    addRelevantSpellKey(policyKey)
+                    addRelevantSpellKey(policy.resolveKey)
+                    addRelevantSpellKey(policy.auraKey)
+                    addRelevantSpellKey(policy.auraCountKey)
+
+                    if type(policy.resolveAnyKeys) == "table" then
+                        for anyIndex = 1, #policy.resolveAnyKeys do
+                            addRelevantSpellKey(policy.resolveAnyKeys[anyIndex])
+                        end
+                    end
+
+                    if policy.auraSpellID then
+                        addRelevantSpellID(policy.auraSpellID)
+                    end
+                end
+            end
+        end
+
+        return relevant
+    end)
 end
 
 local function evaluateSpellPolicy(policyKey, context, addEntry)
@@ -5933,6 +6016,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         invalidateSpellRuntimeCache()
         sanitizeCustomTrackedSpellsInDB()
         ensureDefaultTrackedSpellsForActiveSpec()
+        if runtimeServices.invalidateAuraRelevanceLookup then
+            runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.resetAuraInstanceTracking then
+            runtimeServices.resetAuraInstanceTracking()
+        end
         createMinimapButton()
         msg("loaded v" .. ADDON_VERSION)
         refresh()
@@ -5959,6 +6048,15 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         return
     end
 
+    if event == "UNIT_AURA" and type(arg1) == "string" then
+        local isAuraTrackedUnit = (arg1 == "player") or (arg1 == "mouseover") or arg1:match("^party") or arg1:match("^raid")
+        if isAuraTrackedUnit
+            and runtimeServices.shouldSkipUnitAuraRefresh
+            and runtimeServices.shouldSkipUnitAuraRefresh(arg1, arg2) then
+            return
+        end
+    end
+
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
         if not arg1:match("^party") and not arg1:match("^raid") then
             return
@@ -5979,6 +6077,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 
     if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "SPELLS_CHANGED" then
         atonementCacheDirty = true
+        if runtimeServices.invalidateAuraRelevanceLookup then
+            runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.resetAuraInstanceTracking then
+            runtimeServices.resetAuraInstanceTracking()
+        end
     end
 
     local shouldInvalidateRuntime = true
@@ -6014,6 +6118,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 
             if isSpellInTrackedList(castSpellID) then
                 runtimeServices.applySingleCooldownCastGuard(castSpellID, castState, liveCharges)
+                if runtimeServices.scheduleCastVerificationRefresh then
+                    runtimeServices.scheduleCastVerificationRefresh(castSpellID)
+                end
             end
 
             if isLifeCocoonSpell(castSpellID) then

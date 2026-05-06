@@ -9,4 +9,5 @@ HPM_Core.lua
 HPM_CooldownProvider.lua
 HPM_RefreshQueue.lua
 HPM_PerformanceMonitor.lua
+HPM_CombatHardening.lua
 HealingPriorityMouse.lua
