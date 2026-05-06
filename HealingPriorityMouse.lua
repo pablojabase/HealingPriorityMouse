@@ -179,7 +179,24 @@ runtimeServices.getProviderStatusSummary = function(logger)
     local revision = tostring(status.revision or 0)
     local trackedCount = tostring(status.trackedSpellCount or 0)
     local dirty = status.dirty and "dirty" or "clean"
-    return "Provider: " .. mode .. " | rev " .. revision .. " | tracked " .. trackedCount .. " | " .. dirty
+    local cdmState = "cdm:n/a"
+    if mode == "cdm-hybrid" then
+        if status.cdmAvailable == true then
+            cdmState = "cdm:ready"
+        else
+            cdmState = "cdm:unavailable(" .. tostring(status.cdmFailureReason or "unknown") .. ")"
+        end
+    end
+    local alertsApi = status.hasValidAlertTypesApi and "alerts:yes" or "alerts:no"
+    return "Provider: " .. mode .. " | rev " .. revision .. " | tracked " .. trackedCount .. " | " .. dirty .. " | " .. cdmState .. " | " .. alertsApi
+end
+
+runtimeServices.getProviderSpellMetadata = function(spellID, logger)
+    local provider = runtimeServices.ensureCooldownProvider(logger)
+    if not (provider and provider.GetSpellMetadata) then
+        return nil
+    end
+    return provider:GetSpellMetadata(spellID)
 end
 
 runtimeServices.getLinkTextFromInsertArgs = function(...)
@@ -6151,7 +6168,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 
     local provider = runtimeServices.ensureCooldownProvider(appendDevLogLine)
     if provider and provider.HandleEvent then
-        provider:HandleEvent(event)
+        provider:HandleEvent(event, arg1, arg2, arg3)
     end
 
     if event == "SPELL_UPDATE_COOLDOWN" then
