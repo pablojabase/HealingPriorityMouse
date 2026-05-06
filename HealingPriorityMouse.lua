@@ -59,16 +59,6 @@ local MINIMAP_SHAPES = {
     ["TRICORNER-BOTTOMRIGHT"] = { true, true, true, false },
 }
 
-local function getLogTimestamp()
-    if date then
-        local ok, stamp = pcall(date, "%H:%M:%S")
-        if ok and stamp then
-            return stamp
-        end
-    end
-    return "--:--:--"
-end
-
 local function updateDebugLogWindowText()
     if not (debugLogEditBox and debugLogScroll) then
         return
@@ -82,7 +72,14 @@ local function updateDebugLogWindowText()
 end
 
 local function appendDevLogLine(text)
-    local line = "[" .. getLogTimestamp() .. "] " .. tostring(text or "")
+    local stamp = "--:--:--"
+    if date then
+        local ok, value = pcall(date, "%H:%M:%S")
+        if ok and value then
+            stamp = value
+        end
+    end
+    local line = "[" .. stamp .. "] " .. tostring(text or "")
     devLogLines[#devLogLines + 1] = line
     while #devLogLines > DEV_LOG_MAX_LINES do
         table.remove(devLogLines, 1)
@@ -1008,16 +1005,6 @@ local function isFalseFlag(value, default)
         return result
     end
     return default or false
-end
-
-local function isNodeRankActive(nodeInfo)
-    if not nodeInfo then
-        return false
-    end
-    -- Talent node ranks can also be protected/secret values in Midnight.
-    local ranksPurchased = plainNumber(getSafeTableField(nodeInfo, "ranksPurchased")) or 0
-    local activeRank = plainNumber(getSafeTableField(nodeInfo, "activeRank")) or 0
-    return numberGT(ranksPurchased, 0) or numberGT(activeRank, 0)
 end
 
 local GCD_SPELL_ID = 61304
@@ -2416,16 +2403,6 @@ local function isSpellResourceUsableSafe(spellID)
     return true
 end
 
-local function isCooldownDurationReady(duration, isOnGCD)
-    if duration and numberLE(duration, 0) then
-        return true
-    end
-    if isOnGCD and duration and numberLE(duration, 1.7) then
-        return true
-    end
-    return false
-end
-
 local function getCooldownReady(spellID)
     if not isSpellKnownSafe(spellID) then
         return false
@@ -2684,16 +2661,6 @@ local function updateAtonementCacheFromUnitAura(unit, updateInfo)
     atonementCacheDirty = false
 
     return changed
-end
-
-local function countAliveGroupUnits()
-    local n = 0
-    for _, unit in ipairs(getGroupUnits()) do
-        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
-            n = n + 1
-        end
-    end
-    return n
 end
 
 getSpecID = function()
@@ -3368,51 +3335,51 @@ runtimeServices.applySingleCooldownCastGuard = function(spellID, castState, live
     end
 end
 
-local function formatDiagnosticValue(value)
-    if value == nil then
-        return "nil"
-    end
-    if type(value) == "boolean" then
-        return value and "true" or "false"
-    end
-    return tostring(value)
-end
-
-local function appendDiagnosticField(parts, label, value)
-    parts[#parts + 1] = tostring(label) .. "=" .. formatDiagnosticValue(value)
-end
-
-local function emitDiagnosticLine(prefix, fields)
-    local parts = { prefix }
-    for _, field in ipairs(fields) do
-        parts[#parts + 1] = field
-    end
-    msg(table.concat(parts, " | "))
-end
-
-local function getDurationObjectValue(durationObject, methodName, ...)
-    if not durationObject then
-        return nil
-    end
-    local methodOk, method = pcall(function()
-        return durationObject[methodName]
-    end)
-    if not methodOk then
-        return nil
-    end
-    if type(method) ~= "function" then
-        return nil
-    end
-    local ok, value = pcall(method, durationObject, ...)
-    if ok then
-        return value
-    end
-    return nil
-end
-
 local function dumpSpellAPIDiagnostics(spellID)
     if not spellID then
         return false
+    end
+
+    local function formatDiagnosticValue(value)
+        if value == nil then
+            return "nil"
+        end
+        if type(value) == "boolean" then
+            return value and "true" or "false"
+        end
+        return tostring(value)
+    end
+
+    local function appendDiagnosticField(parts, label, value)
+        parts[#parts + 1] = tostring(label) .. "=" .. formatDiagnosticValue(value)
+    end
+
+    local function emitDiagnosticLine(prefix, fields)
+        local parts = { prefix }
+        for _, field in ipairs(fields) do
+            parts[#parts + 1] = field
+        end
+        msg(table.concat(parts, " | "))
+    end
+
+    local function getDurationObjectValue(durationObject, methodName, ...)
+        if not durationObject then
+            return nil
+        end
+        local methodOk, method = pcall(function()
+            return durationObject[methodName]
+        end)
+        if not methodOk then
+            return nil
+        end
+        if type(method) ~= "function" then
+            return nil
+        end
+        local ok, value = pcall(method, durationObject, ...)
+        if ok then
+            return value
+        end
+        return nil
     end
 
     invalidateSpellRuntimeCache()
@@ -3963,7 +3930,12 @@ local function evaluateSpellPolicy(policyKey, context, addEntry)
             end
             return false
         end
-        local alive = countAliveGroupUnits()
+        local alive = 0
+        for _, unit in ipairs(getGroupUnits()) do
+            if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+                alive = alive + 1
+            end
+        end
         local active = countAuraConceptInGroup("Reversion", true)
         if active < alive then
             return addEntry(label, spellID, iconCount, glowRule, glowContext)
@@ -4197,45 +4169,6 @@ root:SetScript("OnUpdate", function()
     root:SetPoint("CENTER", UIParent, "BOTTOMLEFT", (x / scale) + offsetX, (y / scale) + offsetY)
 end)
 
-local function getNextWakeFromRuntimeState(runtimeState, now)
-    if type(runtimeState) ~= "table" then
-        return nil
-    end
-
-    local nextWakeAt = nil
-
-    local cooldownEndTime = plainNumber(runtimeState.cooldownEndTime)
-    if cooldownEndTime and numberGT(cooldownEndTime, now + 0.01) then
-        nextWakeAt = cooldownEndTime
-    end
-
-    local chargesInfo = runtimeState.chargesInfo
-    if chargesInfo and not chargesInfo.unknown then
-        local current = plainNumber(chargesInfo.current)
-        local max = plainNumber(chargesInfo.max)
-        local rechargeStart = plainNumber(chargesInfo.rechargeStart)
-        local rechargeDuration = plainNumber(chargesInfo.rechargeDuration)
-        local chargeModRate = plainNumber(chargesInfo.chargeModRate)
-
-        if current and max and rechargeDuration and current < max and numberGT(rechargeDuration, 0) then
-            if not (chargeModRate and numberGT(chargeModRate, 0)) then
-                chargeModRate = 1
-            end
-            if not (rechargeStart and numberGT(rechargeStart, 0)) then
-                rechargeStart = now
-            end
-            local chargeReadyAt = rechargeStart + (rechargeDuration / chargeModRate)
-            if numberGT(chargeReadyAt, now + 0.01) then
-                if not nextWakeAt or chargeReadyAt < nextWakeAt then
-                    nextWakeAt = chargeReadyAt
-                end
-            end
-        end
-    end
-
-    return nextWakeAt
-end
-
 local function refresh()
     local entries = buildEntries()
     layoutEntries(entries)
@@ -4266,7 +4199,38 @@ local function refresh()
             wakeSeenSpellIDs[normalizedSpellID] = true
 
             local runtimeState = getSpellRuntimeState(normalizedSpellID)
-            local wakeAt = getNextWakeFromRuntimeState(runtimeState, now)
+            local wakeAt = nil
+            if type(runtimeState) == "table" then
+                local cooldownEndTime = plainNumber(runtimeState.cooldownEndTime)
+                if cooldownEndTime and numberGT(cooldownEndTime, now + 0.01) then
+                    wakeAt = cooldownEndTime
+                end
+
+                local chargesInfo = runtimeState.chargesInfo
+                if chargesInfo and not chargesInfo.unknown then
+                    local current = plainNumber(chargesInfo.current)
+                    local max = plainNumber(chargesInfo.max)
+                    local rechargeStart = plainNumber(chargesInfo.rechargeStart)
+                    local rechargeDuration = plainNumber(chargesInfo.rechargeDuration)
+                    local chargeModRate = plainNumber(chargesInfo.chargeModRate)
+
+                    if current and max and rechargeDuration and current < max and numberGT(rechargeDuration, 0) then
+                        if not (chargeModRate and numberGT(chargeModRate, 0)) then
+                            chargeModRate = 1
+                        end
+                        if not (rechargeStart and numberGT(rechargeStart, 0)) then
+                            rechargeStart = now
+                        end
+                        local chargeReadyAt = rechargeStart + (rechargeDuration / chargeModRate)
+                        if numberGT(chargeReadyAt, now + 0.01) then
+                            if not wakeAt or chargeReadyAt < wakeAt then
+                                wakeAt = chargeReadyAt
+                            end
+                        end
+                    end
+                end
+            end
+
             if wakeAt and (not nextWakeAt or wakeAt < nextWakeAt) then
                 nextWakeAt = wakeAt
             end
@@ -5733,22 +5697,6 @@ local function openOptionsFrame()
     frame:Raise()
 end
 
-local function applyConfiguredMinimapTexture(textureObject)
-    if not textureObject then
-        return
-    end
-
-    local customTexture = CUSTOM_MINIMAP_ICON_TEXTURE
-    if customTexture and customTexture ~= "" then
-        textureObject:SetTexture(customTexture)
-        if textureObject.GetTexture and textureObject:GetTexture() then
-            return
-        end
-    end
-
-    textureObject:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
-end
-
 local function updateMinimapButtonPosition(position)
     if not (minimapButton and Minimap) then
         return
@@ -5805,11 +5753,25 @@ local function updateMinimapButtonIconCoords(button, isMouseDown)
     button.icon:SetTexCoord(minX, maxX, minY, maxY)
 end
 
-local function getMinimapDragAngle(cursorX, cursorY, minimapCenterX, minimapCenterY)
+local function updateMinimapButtonDrag(self)
+    if not (self and Minimap and GetCursorPosition) then
+        return
+    end
+
+    local minimapCenterX, minimapCenterY = Minimap:GetCenter()
+    if not (minimapCenterX and minimapCenterY) then
+        return
+    end
+
+    local scale = Minimap:GetEffectiveScale() or 1
+    local cursorX, cursorY = GetCursorPosition()
+    cursorX = cursorX / scale
+    cursorY = cursorY / scale
+
     local deltaX = cursorX - minimapCenterX
     local deltaY = cursorY - minimapCenterY
     if deltaX == 0 and deltaY == 0 then
-        return nil
+        return
     end
 
     local angle
@@ -5828,26 +5790,7 @@ local function getMinimapDragAngle(cursorX, cursorY, minimapCenterX, minimapCent
             end
         end
     end
-
-    return angle % 360
-end
-
-local function updateMinimapButtonDrag(self)
-    if not (self and Minimap and GetCursorPosition) then
-        return
-    end
-
-    local minimapCenterX, minimapCenterY = Minimap:GetCenter()
-    if not (minimapCenterX and minimapCenterY) then
-        return
-    end
-
-    local scale = Minimap:GetEffectiveScale() or 1
-    local cursorX, cursorY = GetCursorPosition()
-    cursorX = cursorX / scale
-    cursorY = cursorY / scale
-
-    local angle = getMinimapDragAngle(cursorX, cursorY, minimapCenterX, minimapCenterY)
+    angle = angle and (angle % 360) or nil
     if not angle then
         return
     end
@@ -5887,7 +5830,15 @@ local function createMinimapButton()
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetSize(20, 20)
     icon:SetPoint("CENTER")
-    applyConfiguredMinimapTexture(icon)
+    local customTexture = CUSTOM_MINIMAP_ICON_TEXTURE
+    if customTexture and customTexture ~= "" then
+        icon:SetTexture(customTexture)
+        if not (icon.GetTexture and icon:GetTexture()) then
+            icon:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
+        end
+    else
+        icon:SetTexture(getSpellTexture(MINIMAP_ICON_SPELL_ID) or 136243)
+    end
     button.icon = icon
     updateMinimapButtonIconCoords(button, false)
 
