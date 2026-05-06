@@ -60,6 +60,8 @@ local state = runtimeServices.combatHardeningState or {
     castVerifyDelays = { 0.07, 0.18 },
     castVerifyRevision = 0,
     castVerifyRevisionBySpell = {},
+    groupAuraNeedsDirty = true,
+    groupAuraNeeds = true,
 }
 runtimeServices.combatHardeningState = state
 
@@ -177,6 +179,42 @@ end
 
 runtimeServices.invalidateAuraRelevanceLookup = function()
     state.auraLookupDirty = true
+end
+
+runtimeServices.setGroupAuraNeedsProvider = function(provider)
+    if type(provider) == "function" then
+        state.groupAuraNeedsProvider = provider
+    else
+        state.groupAuraNeedsProvider = nil
+    end
+    state.groupAuraNeedsDirty = true
+end
+
+runtimeServices.invalidateGroupAuraNeeds = function()
+    state.groupAuraNeedsDirty = true
+end
+
+local function rebuildGroupAuraNeeds()
+    if state.groupAuraNeedsDirty ~= true then
+        return
+    end
+
+    local needsGroupAura = true
+    local provider = state.groupAuraNeedsProvider
+    if type(provider) == "function" then
+        local ok, result = pcall(provider)
+        if ok then
+            needsGroupAura = (result == true)
+        end
+    end
+
+    state.groupAuraNeeds = needsGroupAura and true or false
+    state.groupAuraNeedsDirty = false
+end
+
+runtimeServices.shouldProcessGroupAuraEvents = function()
+    rebuildGroupAuraNeeds()
+    return state.groupAuraNeeds == true
 end
 
 runtimeServices.resetAuraInstanceTracking = function(unit)

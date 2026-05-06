@@ -2053,6 +2053,9 @@ local function addCustomTrackedSpell(spellID)
     if runtimeServices.invalidateAuraRelevanceLookup then
         runtimeServices.invalidateAuraRelevanceLookup()
     end
+    if runtimeServices.invalidateGroupAuraNeeds then
+        runtimeServices.invalidateGroupAuraNeeds()
+    end
     if runtimeServices.resetAuraInstanceTracking then
         runtimeServices.resetAuraInstanceTracking()
     end
@@ -2105,6 +2108,9 @@ local function ensureDefaultTrackedSpellsForActiveSpec()
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
         end
+        if runtimeServices.invalidateGroupAuraNeeds then
+            runtimeServices.invalidateGroupAuraNeeds()
+        end
         if runtimeServices.resetAuraInstanceTracking then
             runtimeServices.resetAuraInstanceTracking()
         end
@@ -2142,6 +2148,9 @@ local function clearAllTrackedSpells()
     if runtimeServices.invalidateAuraRelevanceLookup then
         runtimeServices.invalidateAuraRelevanceLookup()
     end
+    if runtimeServices.invalidateGroupAuraNeeds then
+        runtimeServices.invalidateGroupAuraNeeds()
+    end
     if runtimeServices.resetAuraInstanceTracking then
         runtimeServices.resetAuraInstanceTracking()
     end
@@ -2177,6 +2186,9 @@ local function removeCustomTrackedSpell(spellID)
         runtimeServices.setCooldownOnlySpellEnabled(id, false)
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.invalidateGroupAuraNeeds then
+            runtimeServices.invalidateGroupAuraNeeds()
         end
         if runtimeServices.resetAuraInstanceTracking then
             runtimeServices.resetAuraInstanceTracking()
@@ -3881,6 +3893,68 @@ if runtimeServices.setAuraRelevanceProvider then
     end)
 end
 
+if runtimeServices.setGroupAuraNeedsProvider then
+    runtimeServices.setGroupAuraNeedsProvider(function()
+        local function policyMatchesTrackedSpell(policyKey, policy, trackedSpellID)
+            if not trackedSpellID then
+                return false
+            end
+
+            local resolvedPrimary = resolvePolicySpellID(policyKey, policy)
+            if resolvedPrimary and resolvedPrimary == trackedSpellID then
+                return true
+            end
+
+            local directIDs = resolveSpellIDs(policyKey)
+            for idIndex = 1, #directIDs do
+                if directIDs[idIndex] == trackedSpellID then
+                    return true
+                end
+            end
+
+            if type(policy) == "table" and type(policy.resolveAnyKeys) == "table" then
+                for keyIndex = 1, #policy.resolveAnyKeys do
+                    local key = policy.resolveAnyKeys[keyIndex]
+                    local keyIDs = resolveSpellIDs(key)
+                    for idIndex = 1, #keyIDs do
+                        if keyIDs[idIndex] == trackedSpellID then
+                            return true
+                        end
+                    end
+                end
+            elseif type(policy) == "table" and type(policy.resolveKey) == "string" then
+                local keyIDs = resolveSpellIDs(policy.resolveKey)
+                for idIndex = 1, #keyIDs do
+                    if keyIDs[idIndex] == trackedSpellID then
+                        return true
+                    end
+                end
+            end
+
+            return false
+        end
+
+        local tracked = getCustomTrackedSpells()
+        for index = 1, #tracked do
+            local trackedSpellID = normalizeSpellID(tracked[index])
+            if trackedSpellID then
+                for policyKey, policy in pairs(SPELL_POLICIES) do
+                    if policyMatchesTrackedSpell(policyKey, policy, trackedSpellID) then
+                        local condition = policy and policy.condition
+                        if condition == "lifebloomRefreshOnMouseover"
+                            or condition == "groupAuraBelowThreshold"
+                            or condition == "reversionCoverage"
+                            or condition == "counterAlways" then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        return false
+    end)
+end
+
 local function evaluateSpellPolicy(policyKey, context, addEntry)
     local policy = SPELL_POLICIES[policyKey]
     if not policy then
@@ -4088,11 +4162,55 @@ local function buildEntries()
         specID = specID,
         mouseover = mouseover,
     }
-    for _, policyKey in ipairs(corePolicyKeys) do
-        evaluateSpellPolicy(policyKey, policyContext, addEntry)
+    local customSpells = getCustomTrackedSpells()
+    local trackedSpellSet = {}
+    for index = 1, #customSpells do
+        local trackedSpellID = customSpells[index]
+        if trackedSpellID then
+            trackedSpellSet[trackedSpellID] = true
+        end
     end
 
-    local customSpells = getCustomTrackedSpells()
+    for _, policyKey in ipairs(corePolicyKeys) do
+        local policy = SPELL_POLICIES[policyKey]
+        local shouldEvaluatePolicy = false
+
+        local policySpellID = resolvePolicySpellID(policyKey, policy)
+        if policySpellID and trackedSpellSet[policySpellID] then
+            shouldEvaluatePolicy = true
+        end
+
+        if not shouldEvaluatePolicy then
+            local directIDs = resolveSpellIDs(policyKey)
+            for idIndex = 1, #directIDs do
+                if trackedSpellSet[directIDs[idIndex]] then
+                    shouldEvaluatePolicy = true
+                    break
+                end
+            end
+        end
+
+        if not shouldEvaluatePolicy and type(policy) == "table" and type(policy.resolveAnyKeys) == "table" then
+            for keyIndex = 1, #policy.resolveAnyKeys do
+                local key = policy.resolveAnyKeys[keyIndex]
+                local keyIDs = resolveSpellIDs(key)
+                for idIndex = 1, #keyIDs do
+                    if trackedSpellSet[keyIDs[idIndex]] then
+                        shouldEvaluatePolicy = true
+                        break
+                    end
+                end
+                if shouldEvaluatePolicy then
+                    break
+                end
+            end
+        end
+
+        if shouldEvaluatePolicy then
+            evaluateSpellPolicy(policyKey, policyContext, addEntry)
+        end
+    end
+
     for _, customSpellID in ipairs(customSpells) do
         local showInCooldownOnlyMode = runtimeServices.isCooldownOnlySpellEnabled(customSpellID)
         local readyForCustomSpell = hasAvailableChargeOrReadyStrict(customSpellID)
@@ -6019,6 +6137,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
         end
+        if runtimeServices.invalidateGroupAuraNeeds then
+            runtimeServices.invalidateGroupAuraNeeds()
+        end
         if runtimeServices.resetAuraInstanceTracking then
             runtimeServices.resetAuraInstanceTracking()
         end
@@ -6061,8 +6182,28 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if not arg1:match("^party") and not arg1:match("^raid") then
             return
         end
+        if runtimeServices.shouldProcessGroupAuraEvents
+            and not runtimeServices.shouldProcessGroupAuraEvents() then
+            local isMouseoverUnit = false
+            if UnitExists("mouseover") and UnitIsUnit then
+                local sameUnitOk, sameUnit = pcall(UnitIsUnit, arg1, "mouseover")
+                if sameUnitOk and sameUnit then
+                    isMouseoverUnit = true
+                end
+            end
+            if not isMouseoverUnit then
+                return
+            end
+        end
 
-        local atonementCacheChanged = updateAtonementCacheFromUnitAura(arg1, arg2)
+        local atonementCacheChanged = false
+        local currentSpecID = getSpecID and getSpecID() or nil
+        if currentSpecID == 256 then
+            local atonementSpellID = resolveSpellID("Atonement") or 194384
+            if isSpellInTrackedList(atonementSpellID) then
+                atonementCacheChanged = updateAtonementCacheFromUnitAura(arg1, arg2)
+            end
+        end
 
         local now = getNowTime()
         if not atonementCacheChanged and (now - lastGroupAuraRefresh) < GROUP_AURA_REFRESH_INTERVAL then
@@ -6079,6 +6220,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         atonementCacheDirty = true
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
+        end
+        if runtimeServices.invalidateGroupAuraNeeds then
+            runtimeServices.invalidateGroupAuraNeeds()
         end
         if runtimeServices.resetAuraInstanceTracking then
             runtimeServices.resetAuraInstanceTracking()
