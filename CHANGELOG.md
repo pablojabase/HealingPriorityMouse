@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.1.2] - 2026-05-06
 
 ### Added
 - Added a per-tracked-spell `CD-only` mode so selected spells can be shown only while on cooldown, including slash controls via `/hpm cdonly list|add|remove`.
@@ -15,6 +15,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 - Reworked minimap-button dragging/positioning to follow the LibDBIcon-style behavior used by addons like VuhDo and KeystonePolaris (more consistent hover-ring movement around minimap shapes).
+- Improved Preservation Evoker tracking consistency by hardening `Reversion` coverage checks, promoting `Verdant Embrace` to core-policy handling, and improving cooldown wake scheduling for tracked-but-currently-hidden spells.
+- Reduced top-level chunk local pressure again to avoid Lua `main function has more than 200 local variables` warnings on reload.
 
 ## [2.1.1] - 2026-04-23
 
