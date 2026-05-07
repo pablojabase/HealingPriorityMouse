@@ -116,20 +116,40 @@ function RefreshQueue:RequestAt(timestamp, options)
     end
 
     local now = getNow()
-    if wakeTimestamp <= (now + 0.01) then
+    local shouldDispatchNow = false
+    local okDispatchNow = pcall(function()
+        shouldDispatchNow = (wakeTimestamp <= (now + 0.01))
+    end)
+    if not okDispatchNow then
+        return
+    end
+
+    if shouldDispatchNow then
         self:Request(options)
         return
     end
 
-    if self.wakeAt and math.abs(self.wakeAt - wakeTimestamp) <= 0.03 then
-        return
+    if self.wakeAt then
+        local isSameWakeTime = false
+        local okDelta = pcall(function()
+            isSameWakeTime = (math.abs(self.wakeAt - wakeTimestamp) <= 0.03)
+        end)
+        if okDelta and isSameWakeTime then
+            return
+        end
     end
 
     self:CancelWake()
     self.wakeAt = wakeTimestamp
 
     if C_Timer and C_Timer.NewTimer then
-        local delay = math.max(0.01, wakeTimestamp - now)
+        local delay = 0.01
+        local okDelay = pcall(function()
+            delay = math.max(0.01, wakeTimestamp - now)
+        end)
+        if not okDelay then
+            return
+        end
         self.wakeTimer = C_Timer.NewTimer(delay, function()
             self.wakeTimer = nil
             self.wakeAt = nil

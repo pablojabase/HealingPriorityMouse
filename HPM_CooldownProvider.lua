@@ -1,12 +1,32 @@
 local ns = HealingPriorityMouseNS or {}
 HealingPriorityMouseNS = ns
 
+local safeNumber = ns.safeNumber or function(value)
+    local okToNumber, numberValue = pcall(tonumber, value)
+    if okToNumber and type(numberValue) == "number" then
+        return numberValue
+    end
+    return nil
+end
+
 local normalizeSpellID = ns.normalizeSpellID or function(value)
-    local numberValue = tonumber(value)
-    if not numberValue or numberValue <= 0 then
+    local numberValue = safeNumber(value)
+    if type(numberValue) ~= "number" then
         return nil
     end
-    return math.floor(numberValue + 0.5)
+    local okPositive, isPositive = pcall(function()
+        return numberValue > 0
+    end)
+    if not okPositive or not isPositive then
+        return nil
+    end
+    local okRound, rounded = pcall(function()
+        return math.floor(numberValue + 0.5)
+    end)
+    if not okRound or type(rounded) ~= "number" then
+        return nil
+    end
+    return rounded
 end
 local addUniqueSpellID = ns.addUniqueSpellID or function(list, seen, spellID)
     local normalized = normalizeSpellID(spellID)
@@ -107,8 +127,10 @@ end
 
 local function normalizeAlertTypeValue(value)
     if type(value) == "number" then
-        local normalized = math.floor(value + 0.5)
-        if ALERT_NAME_BY_VALUE[normalized] then
+        local okRound, normalized = pcall(function()
+            return math.floor(value + 0.5)
+        end)
+        if okRound and type(normalized) == "number" and ALERT_NAME_BY_VALUE[normalized] then
             return normalized
         end
         return nil

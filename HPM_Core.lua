@@ -3,21 +3,49 @@ local ns = HealingPriorityMouseNS
 
 ns.modules = ns.modules or {}
 
+local function isTaintSafeNumber(candidate)
+    if type(candidate) ~= "number" then
+        return nil
+    end
+
+    -- Secret numbers can throw when compared; reject those up-front.
+    local okCompare = pcall(function()
+        return candidate <= 0
+    end)
+    if not okCompare then
+        return nil
+    end
+
+    local okMath, numeric = pcall(function()
+        return candidate + 0
+    end)
+    if okMath and type(numeric) == "number" then
+        local okNumericCompare = pcall(function()
+            return numeric <= 0
+        end)
+        if okNumericCompare then
+            return numeric
+        end
+    end
+    return nil
+end
+
 local function safeNumber(value)
     if value == nil then
         return nil
     end
 
-    local okMath, numeric = pcall(function()
-        return value + 0
-    end)
-    if okMath and type(numeric) == "number" then
+    local numeric = isTaintSafeNumber(value)
+    if numeric ~= nil then
         return numeric
     end
 
     local okToNumber, fallback = pcall(tonumber, value)
-    if okToNumber and type(fallback) == "number" then
-        return fallback
+    if okToNumber then
+        local numericFallback = isTaintSafeNumber(fallback)
+        if numericFallback ~= nil then
+            return numericFallback
+        end
     end
 
     return nil
@@ -25,10 +53,23 @@ end
 
 local function normalizeSpellID(value)
     local numeric = safeNumber(value)
-    if not numeric or numeric <= 0 then
+    if numeric == nil then
         return nil
     end
-    return math.floor(numeric + 0.5)
+    local okPositive, isPositive = pcall(function()
+        return numeric > 0
+    end)
+    if not okPositive or not isPositive then
+        return nil
+    end
+
+    local okRound, rounded = pcall(function()
+        return math.floor(numeric + 0.5)
+    end)
+    if okRound and type(rounded) == "number" then
+        return rounded
+    end
+    return nil
 end
 
 local function getNow()
