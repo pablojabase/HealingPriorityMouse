@@ -6,11 +6,35 @@ ns.runtimeServices = runtimeServices
 
 local normalizeSpellID
 normalizeSpellID = function(value)
+    local function normalizeCandidate(candidate)
+        if type(candidate) ~= "number" then
+            return nil
+        end
+
+        local okPositive, isPositive = pcall(function()
+            return candidate > 0
+        end)
+        if not okPositive or not isPositive then
+            return nil
+        end
+
+        local okRounded, rounded = pcall(function()
+            return math.floor(candidate + 0.5)
+        end)
+        if okRounded and type(rounded) == "number" then
+            return rounded
+        end
+        return nil
+    end
+
     local normalizeProvider = ns.normalizeSpellID
     if type(normalizeProvider) == "function" and normalizeProvider ~= normalizeSpellID then
         local okNormalize, normalizedValue = pcall(normalizeProvider, value)
-        if okNormalize and type(normalizedValue) == "number" and normalizedValue > 0 then
-            return math.floor(normalizedValue + 0.5)
+        if okNormalize then
+            local normalizedFromProvider = normalizeCandidate(normalizedValue)
+            if normalizedFromProvider then
+                return normalizedFromProvider
+            end
         end
     end
 
@@ -25,10 +49,7 @@ normalizeSpellID = function(value)
     if numeric == nil then
         numeric = tonumber(value)
     end
-    if not numeric or numeric <= 0 then
-        return nil
-    end
-    return math.floor(numeric + 0.5)
+    return normalizeCandidate(numeric)
 end
 
 local getNow
