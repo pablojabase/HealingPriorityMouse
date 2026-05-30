@@ -1722,24 +1722,72 @@ local function sanitizeCustomTrackedSpellsInDB()
     return db.customTrackedSpellsByCharacter[characterKey]
 end
 
-local function getCustomTrackedSpells()
+local EMPTY_TRACKED_SPELLS = {}
+local EMPTY_TRACKED_SPELL_MAP = {}
+local trackedSpellsCache = {
+    dirty = true,
+    characterKey = nil,
+    list = nil,
+    lookup = nil,
+    cooldownOnlyMap = nil,
+}
+
+local function invalidateTrackedSpellsCache()
+    trackedSpellsCache.dirty = true
+    trackedSpellsCache.list = nil
+    trackedSpellsCache.lookup = nil
+    trackedSpellsCache.cooldownOnlyMap = nil
+end
+runtimeServices.invalidateTrackedSpellsCache = invalidateTrackedSpellsCache
+
+local function ensureTrackedSpellsCache()
     if not HealingPriorityMouseDB then
-        return {}
+        return EMPTY_TRACKED_SPELLS, EMPTY_TRACKED_SPELL_MAP, EMPTY_TRACKED_SPELL_MAP
     end
-    return sanitizeCustomTrackedSpellsInDB()
+
+    local characterKey = getTrackedCharacterKey()
+    if trackedSpellsCache.characterKey ~= characterKey then
+        trackedSpellsCache.characterKey = characterKey
+        trackedSpellsCache.dirty = true
+    end
+
+    if trackedSpellsCache.dirty ~= true
+        and type(trackedSpellsCache.list) == "table"
+        and type(trackedSpellsCache.lookup) == "table"
+        and type(trackedSpellsCache.cooldownOnlyMap) == "table" then
+        return trackedSpellsCache.list, trackedSpellsCache.lookup, trackedSpellsCache.cooldownOnlyMap
+    end
+
+    local trackedList = sanitizeCustomTrackedSpellsInDB()
+    local trackedLookup = {}
+    for index = 1, #trackedList do
+        local spellID = trackedList[index]
+        if spellID then
+            trackedLookup[spellID] = true
+        end
+    end
+
+    local cooldownOnlyMap = HealingPriorityMouseDB.cooldownOnlySpellsByCharacter and HealingPriorityMouseDB.cooldownOnlySpellsByCharacter[characterKey]
+    if type(cooldownOnlyMap) ~= "table" then
+        cooldownOnlyMap = {}
+    end
+
+    trackedSpellsCache.list = trackedList
+    trackedSpellsCache.lookup = trackedLookup
+    trackedSpellsCache.cooldownOnlyMap = cooldownOnlyMap
+    trackedSpellsCache.dirty = false
+
+    return trackedList, trackedLookup, cooldownOnlyMap
+end
+
+local function getCustomTrackedSpells()
+    local trackedList = ensureTrackedSpellsCache()
+    return trackedList
 end
 
 runtimeServices.getCooldownOnlySpellModeMap = function()
-    if not HealingPriorityMouseDB then
-        return {}
-    end
-    sanitizeCustomTrackedSpellsInDB()
-    local characterKey = getTrackedCharacterKey()
-    local map = HealingPriorityMouseDB.cooldownOnlySpellsByCharacter and HealingPriorityMouseDB.cooldownOnlySpellsByCharacter[characterKey]
-    if type(map) ~= "table" then
-        return {}
-    end
-    return map
+    local _, _, modeMap = ensureTrackedSpellsCache()
+    return modeMap
 end
 
 runtimeServices.isCooldownOnlySpellEnabled = function(spellID)
@@ -1763,20 +1811,17 @@ runtimeServices.setCooldownOnlySpellEnabled = function(spellID, enabled)
     else
         modeMap[id] = nil
     end
+    invalidateTrackedSpellsCache()
     return true
 end
 
 local function isSpellInTrackedList(spellID)
-    if not spellID then
+    local id = plainNumber(spellID)
+    if not id then
         return false
     end
-    local tracked = getCustomTrackedSpells()
-    for _, existing in ipairs(tracked) do
-        if existing == spellID then
-            return true
-        end
-    end
-    return false
+    local _, trackedLookup = ensureTrackedSpellsCache()
+    return trackedLookup[id] == true
 end
 
 local function isValidSpellID(spellID)
@@ -2067,6 +2112,7 @@ local function addCustomTrackedSpell(spellID)
     end
 
     spells[#spells + 1] = id
+    invalidateTrackedSpellsCache()
     if runtimeServices.invalidateAuraRelevanceLookup then
         runtimeServices.invalidateAuraRelevanceLookup()
     end
@@ -2122,6 +2168,7 @@ local function ensureDefaultTrackedSpellsForActiveSpec()
 
     if addedAny then
         sanitizeCustomTrackedSpellsInDB()
+        invalidateTrackedSpellsCache()
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
         end
@@ -2161,6 +2208,7 @@ local function clearAllTrackedSpells()
         db.cooldownOnlySpellsByCharacter = {}
     end
     db.cooldownOnlySpellsByCharacter[characterKey] = {}
+    invalidateTrackedSpellsCache()
 
     if runtimeServices.invalidateAuraRelevanceLookup then
         runtimeServices.invalidateAuraRelevanceLookup()
@@ -2200,6 +2248,7 @@ local function removeCustomTrackedSpell(spellID)
         for _, value in ipairs(filtered) do
             activeSpells[#activeSpells + 1] = value
         end
+        invalidateTrackedSpellsCache()
         runtimeServices.setCooldownOnlySpellEnabled(id, false)
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
@@ -2492,21 +2541,64 @@ local function getCooldownReadyByTimer(spellID, failOpen)
     return allowFailOpen
 end
 
+local groupUnitsCache = {
+    dirty = true,
+    isRaid = false,
+    groupCount = 0,
+    subgroupCount = 0,
+    units = {},
+}
+
+local function invalidateGroupUnitsCache()
+    groupUnitsCache.dirty = true
+end
+
 local function getGroupUnits()
-    local units = {}
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
+    local isRaid = IsInRaid() and true or false
+    local groupCount = GetNumGroupMembers() or 0
+    local subgroupCount = GetNumSubgroupMembers() or 0
+
+    if groupUnitsCache.dirty ~= true
+        and groupUnitsCache.isRaid == isRaid
+        and groupUnitsCache.groupCount == groupCount
+        and groupUnitsCache.subgroupCount == subgroupCount then
+        return groupUnitsCache.units
+    end
+
+    local units = groupUnitsCache.units
+    for index = #units, 1, -1 do
+        units[index] = nil
+    end
+
+    if isRaid then
+        for i = 1, groupCount do
             units[#units + 1] = "raid" .. i
         end
     elseif IsInGroup() then
         units[#units + 1] = "player"
-        for i = 1, GetNumSubgroupMembers() do
+        for i = 1, subgroupCount do
             units[#units + 1] = "party" .. i
         end
     else
         units[#units + 1] = "player"
     end
+
+    groupUnitsCache.dirty = false
+    groupUnitsCache.isRaid = isRaid
+    groupUnitsCache.groupCount = groupCount
+    groupUnitsCache.subgroupCount = subgroupCount
+
     return units
+end
+
+local function isGroupUnitToken(unit)
+    if type(unit) ~= "string" then
+        return false
+    end
+    if string.sub(unit, 1, 4) == "raid" then
+        return true
+    end
+    return string.sub(unit, 1, 5) == "party"
 end
 
 local function countAuraInGroup(spellID, fromPlayerOnly)
@@ -2754,7 +2846,7 @@ runtimeServices.shouldShowLifebloomThresholdControls = function()
         return false
     end
 
-    local tracked = getCustomTrackedSpells()
+    local tracked, trackedLookup = ensureTrackedSpellsCache()
     if type(tracked) ~= "table" or #tracked == 0 then
         return false
     end
@@ -2764,15 +2856,8 @@ runtimeServices.shouldShowLifebloomThresholdControls = function()
         return false
     end
 
-    local lifebloomByID = {}
     for _, id in ipairs(lifebloomIDs) do
-        if id then
-            lifebloomByID[id] = true
-        end
-    end
-
-    for _, spellID in ipairs(tracked) do
-        if lifebloomByID[spellID] then
+        if id and trackedLookup[id] == true then
             return true
         end
     end
@@ -4137,6 +4222,8 @@ local function buildEntries()
     local mouseover = getFriendlyMouseover()
     local entries = {}
     local addedSpellIDs = {}
+    local customSpells
+    local trackedSpellSet
 
     local function isHandledByCoreSpecLogic(spellID)
         if not specID or not spellID then
@@ -4156,7 +4243,7 @@ local function buildEntries()
         if not spellID then
             return false
         end
-        if not isSpellInTrackedList(spellID) then
+        if not trackedSpellSet or trackedSpellSet[spellID] ~= true then
             return false
         end
         if addedSpellIDs[spellID] then
@@ -4179,14 +4266,7 @@ local function buildEntries()
         specID = specID,
         mouseover = mouseover,
     }
-    local customSpells = getCustomTrackedSpells()
-    local trackedSpellSet = {}
-    for index = 1, #customSpells do
-        local trackedSpellID = customSpells[index]
-        if trackedSpellID then
-            trackedSpellSet[trackedSpellID] = true
-        end
-    end
+    customSpells, trackedSpellSet = ensureTrackedSpellsCache()
 
     for _, policyKey in ipairs(corePolicyKeys) do
         local policy = SPELL_POLICIES[policyKey]
@@ -4278,6 +4358,7 @@ local function layoutEntries(entries)
     end
     local size = 26 * (HealingPriorityMouseDB.scale or 1)
     local showBorders = HealingPriorityMouseDB.showBorders and true or false
+    local opacity = clampOpacity(tonumber(HealingPriorityMouseDB.opacity) or 1.0) or 1.0
     for i = 1, #entries do
         local f = ensureIcon(i)
         f:SetScale(HealingPriorityMouseDB.scale or 1)
@@ -4286,7 +4367,6 @@ local function layoutEntries(entries)
         f.icon:SetTexture(entries[i].icon)
         setIconBorder(f, showBorders)
 
-        local opacity = clampOpacity(tonumber(HealingPriorityMouseDB.opacity) or 1.0) or 1.0
         f.icon:SetAlpha(opacity)
         f.cooldown:SetAlpha(opacity)
 
@@ -4383,6 +4463,27 @@ root:SetScript("OnUpdate", function()
     if not offsetY then
         offsetY = 18
     end
+
+    local anchorState = runtimeServices.cursorAnchorState
+    if type(anchorState) ~= "table" then
+        anchorState = {}
+        runtimeServices.cursorAnchorState = anchorState
+    end
+
+    if x == anchorState.x
+        and y == anchorState.y
+        and scale == anchorState.scale
+        and offsetX == anchorState.offsetX
+        and offsetY == anchorState.offsetY then
+        return
+    end
+
+    anchorState.x = x
+    anchorState.y = y
+    anchorState.scale = scale
+    anchorState.offsetX = offsetX
+    anchorState.offsetY = offsetY
+
     root:ClearAllPoints()
     root:SetPoint("CENTER", UIParent, "BOTTOMLEFT", (x / scale) + offsetX, (y / scale) + offsetY)
 end)
@@ -6171,6 +6272,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         provider:HandleEvent(event, arg1, arg2, arg3)
     end
 
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 ~= "player" then
+        return
+    end
+
     if event == "SPELL_UPDATE_COOLDOWN" then
         runtimeServices.queueCoalescedCooldownRefresh("cooldown")
         return
@@ -6187,7 +6292,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     end
 
     if event == "UNIT_AURA" and type(arg1) == "string" then
-        local isAuraTrackedUnit = (arg1 == "player") or (arg1 == "mouseover") or arg1:match("^party") or arg1:match("^raid")
+        local isAuraTrackedUnit = (arg1 == "player") or (arg1 == "mouseover") or isGroupUnitToken(arg1)
         if isAuraTrackedUnit
             and runtimeServices.shouldSkipUnitAuraRefresh
             and runtimeServices.shouldSkipUnitAuraRefresh(arg1, arg2) then
@@ -6196,7 +6301,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     end
 
     if event == "UNIT_AURA" and arg1 and arg1 ~= "player" and arg1 ~= "mouseover" then
-        if not arg1:match("^party") and not arg1:match("^raid") then
+        if not isGroupUnitToken(arg1) then
             return
         end
         if runtimeServices.shouldProcessGroupAuraEvents
@@ -6235,6 +6340,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 
     if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "SPELLS_CHANGED" then
         atonementCacheDirty = true
+        invalidateGroupUnitsCache()
         if runtimeServices.invalidateAuraRelevanceLookup then
             runtimeServices.invalidateAuraRelevanceLookup()
         end
@@ -6247,7 +6353,11 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     end
 
     local shouldInvalidateRuntime = true
-    if event == "UNIT_AURA" or event == "UPDATE_MOUSEOVER_UNIT" or event == "GROUP_ROSTER_UPDATE" or event == "UNIT_POWER_UPDATE" then
+    if event == "UNIT_AURA"
+        or event == "UPDATE_MOUSEOVER_UNIT"
+        or event == "GROUP_ROSTER_UPDATE"
+        or event == "UNIT_POWER_UPDATE"
+        or event == "UNIT_SPELLCAST_SUCCEEDED" then
         shouldInvalidateRuntime = false
     end
 
@@ -6258,6 +6368,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" and arg1 == "player" then
         local castSpellID = plainNumber(arg3)
         if castSpellID then
+            local castSpellIsTracked = isSpellInTrackedList(castSpellID)
+            if castSpellIsTracked then
+                invalidateSpellRuntimeCache()
+            end
             local castState = getSpellRuntimeState(castSpellID)
             local liveCharges = castState and castState.chargesInfo or getSafeCharges(castSpellID)
             local hasLiveChargeState = liveCharges and not liveCharges.unknown and liveCharges.current and liveCharges.max
@@ -6277,7 +6391,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                 runtimeServices.mirrorChargeCacheToRuntimeCandidates(castSpellID, castState)
             end
 
-            if isSpellInTrackedList(castSpellID) then
+            if castSpellIsTracked then
                 runtimeServices.applySingleCooldownCastGuard(castSpellID, castState, liveCharges)
                 if runtimeServices.scheduleCastVerificationRefresh then
                     runtimeServices.scheduleCastVerificationRefresh(castSpellID)
